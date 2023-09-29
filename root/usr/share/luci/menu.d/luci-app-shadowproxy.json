@@ -1,0 +1,13 @@
+{
+  "admin/services/shadowproxy": {
+    "title": "ShadowProxy",
+    "order": 80,
+    "action": {
+      "type": "view",
+      "path": "shadowproxy"
+    },
+    "depends": {
+      "acl": [ "luci-app-shadowproxy" ]
+    }
+  }
+}

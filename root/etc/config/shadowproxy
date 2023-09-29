@@ -1,0 +1,25 @@
+
+config main
+	option redir_port '60080'
+	option dns_port '5300'
+	option dns_remote_addr '1.1.1.1'
+	option dns_local_addr '223.5.5.5'
+	option proxy_all_dns '1'
+	option worker_count 64
+
+config server
+    option enabled '1'
+	option server '45.32.222.22'
+	option server_port '8388'
+	option password 'barfoo!'
+	option method 'rc4-md5'
+
+config server
+    option enabled '0'
+	option server '2001:19f0:5001:46b:4:3:2:1'
+	option server_port '8388'
+	option password 'barfoo!'
+	option method 'rc4-md5'
+
+config acl
+    option enabled '1'

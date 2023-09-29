@@ -1,0 +1,24 @@
+{
+  "luci-app-shadowproxy": {
+    "description": "Grant access to shadowproxy",
+    "read": {
+      "ubus": {
+        "uci": [ "get" ]
+      },
+      "file": {
+        "/usr/bin/sslocal": [ "exec" ],
+        "/etc/shadowproxy/*": ["read"]
+      },
+      "uci": ["shadowproxy"]
+    },
+    "write": {
+      "ubus": {
+        "uci": [ "set", "commit" ]
+      },
+      "file": {
+        "/etc/shadowproxy/*": ["write"]
+      },
+      "uci": ["shadowproxy"]
+    }
+  }
+}

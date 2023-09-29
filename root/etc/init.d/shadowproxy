@@ -1,0 +1,199 @@
+#!/bin/sh /etc/rc.common
+#
+# Copyright (C) 2014-2023 King <9566618@gmail.com>
+#
+# This is free software, licensed under the GNU General Public License v3.
+# See /LICENSE for more information.
+#
+
+START=90
+STOP=15
+
+USE_PROCD=1
+
+NAME=shadowproxy
+
+CONF_DIR=/etc/$NAME
+TPROXY_PORT=60080
+DNS_PORT=5300
+SERVER_LIST_V4=""
+SERVER_LIST_V6=""
+
+uci_load "$NAME"
+
+parse_config_main() {
+  section_name="$1"
+  local redir_port
+  local dns_port
+  local dns_remote_addr
+  local dns_local_addr
+  local worker_count
+
+  config_get redir_port "$section_name" redir_port
+  config_get dns_port "$section_name" dns_port
+  config_get dns_remote_addr "$section_name" dns_remote_addr
+  config_get dns_local_addr "$section_name" dns_local_addr
+  config_get worker_count "$section_name" worker_count
+
+  if [ "$redir_port" != "$TPROXY_PORT" ]; then
+    TPROXY_PORT=$redir_port
+  fi
+
+  if [ "$dns_port" != "$DNS_PORT" ]; then
+    DNS_PORT=$dns_port
+  fi
+
+  # sed replace the template string
+  sed -i "s/\"{redir_port}\"/${redir_port}/g" "$CONF_DIR/config.json"
+  sed -i "s/\"{dns_port}\"/${dns_port}/g" "$CONF_DIR/config.json"
+  sed -i "s/\"{dns_remote_addr}\"/\"${dns_remote_addr}\"/g" "$CONF_DIR/config.json"
+  sed -i "s/\"{dns_local_addr}\"/\"${dns_local_addr}\"/g" "$CONF_DIR/config.json"
+  sed -i "s/\"{worker_count}\"/${worker_count}/g" "$CONF_DIR/config.json"
+}
+
+
+SERVER_LIST_STR=""
+
+parse_config_server() {
+  section_name="$1"
+  local server
+  local server_port
+  local password
+  local method
+  local enabled
+
+  config_get server $section_name server
+  config_get server_port $section_name server_port
+  config_get password $section_name password
+  config_get method $section_name method
+  config_get enabled $section_name enabled
+
+  if [ "${enabled}" = '1' ]; then
+    if [ "${server}" = "$(echo $server | grep -E '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')" ]; then
+      SERVER_LIST_V4="$SERVER_LIST_V4 ${server},"
+    elif [ "${server}" = "$(echo $server | grep -E '^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{1,4}$' )" ]; then
+      SERVER_LIST_V6="$SERVER_LIST_V6 ${server},"
+    else
+      echo "Unrecognized IP format $server"
+    fi
+
+    if [ -n "${SERVER_LIST_STR}" ]; then
+      SERVER_LIST_STR="${SERVER_LIST_STR},\n"
+    fi
+    SERVER_LIST_STR="${SERVER_LIST_STR}{\n"
+    SERVER_LIST_STR="${SERVER_LIST_STR}      \"server\": \"${server}\",\n"
+    SERVER_LIST_STR="${SERVER_LIST_STR}      \"server_port\": ${server_port},\n"
+    SERVER_LIST_STR="${SERVER_LIST_STR}      \"password\": \"${password}\",\n"
+    SERVER_LIST_STR="${SERVER_LIST_STR}      \"method\": \"${method}\"\n"
+    SERVER_LIST_STR="${SERVER_LIST_STR}    }"
+  fi
+}
+
+generate_config_json() {
+  cp "$CONF_DIR/config-template.json" "$CONF_DIR/config.json"
+
+  config_foreach parse_config_main main
+
+  config_foreach parse_config_server server
+  sed -i "s/\"{servers_list}\"/${SERVER_LIST_STR}/g" "$CONF_DIR/config.json"
+}
+
+config_sysctl() {
+  sysctl -w net.bridge.bridge-nf-call-arptables=0 > /dev/null
+  sysctl -w net.bridge.bridge-nf-call-iptables=0 > /dev/null
+  sysctl -w net.bridge.bridge-nf-call-ip6tables=0 > /dev/null
+}
+
+config_route() {
+  ip -4 rule del fwmark 0x1 table 803 || true
+  ip -4 rule add fwmark 0x1 table 803
+  ip -4 route del local 0.0.0.0/0 dev lo table 803 || true
+  ip -4 route add local 0.0.0.0/0 dev lo table 803
+
+  ip -6 rule del fwmark 0x1 table 803 || true
+  ip -6 rule add fwmark 0x1 table 803
+  ip -6 route del local ::/0 dev lo table 803 || true
+  ip -6 route add local ::/0 dev lo table 803
+}
+
+update_nftables() {
+  if [ -n "$(nft list tables | grep shadowproxy-mangle)" ]; then
+    nft delete table inet shadowproxy-mangle
+  fi
+  nft -f /etc/shadowproxy/shadowproxy.nft -Dtproxy_port=${TPROXY_PORT}
+  # read the bypass file
+  for item in $(grep -v '^$' /etc/shadowproxy/bypass_ipset.acl | grep -v '^#'); do
+    if [ "${item}" = "$(echo $item | grep -E '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')" ]; then
+      SERVER_LIST_V4="$SERVER_LIST_V4 ${item},"
+    elif [ "${item}" = "$(echo $item | grep -E '^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{1,4}$')" ]; then
+      SERVER_LIST_V6="$SERVER_LIST_V6 ${item},"
+    else
+      echo "Unrecognized IP format $item"
+    fi
+  done
+
+  if [ -n "${SERVER_LIST_V4}" ]; then
+    nft add element inet shadowproxy-mangle whitelist_v4_set \{ "${SERVER_LIST_V4}" \}
+  fi
+  if [ -n "${SERVER_LIST_V6}" ]; then
+    nft add element inet shadowproxy-mangle whitelist_v6_set \{ "${SERVER_LIST_V6}" \}
+  fi
+}
+
+start_shadowproxy() {
+  procd_open_instance shadowproxy
+  procd_set_param command /usr/bin/sslocal -c /etc/shadowproxy/config.json
+  procd_set_param pidfile /var/run/shadowproxy.pid
+  procd_set_param file /etc/shadowproxy/config.json
+  procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-2}
+  procd_set_param limits core="unlimited"
+  procd_set_param stdout 1
+  procd_set_param stderr 1
+  procd_set_param limits nofile="20480 20480"
+  procd_close_instance
+}
+
+set_dnsmasq() {
+  addr="127.0.0.1#$DNS_PORT"
+  # space in suffix is important
+  OLD_SERVER="$(uci -q get dhcp.@dnsmasq[0].server) "
+  if echo "$OLD_SERVER" | grep "^$addr " >/dev/null 2>&1; then
+    return
+  fi
+
+  uci -q delete dhcp.@dnsmasq[0].server
+  uci -q add_list dhcp.@dnsmasq[0].server="$addr"
+  uci -q set dhcp.@dnsmasq[0].noresolv=1
+  uci commit dhcp
+  /etc/init.d/dnsmasq reload
+}
+
+unset_dnsmasq() {
+    uci -q delete dhcp.@dnsmasq[0].server
+    uci -q delete dhcp.@dnsmasq[0].noresolv
+    uci commit dhcp
+    /etc/init.d/dnsmasq reload
+}
+
+start_service() {
+  if [ -z "$(command -v /usr/bin/sslocal)" ]; then
+    echo "/usr/bin/sslocal is not exist, please install it."
+    exit 1
+  fi
+  generate_config_json
+  config_sysctl
+  config_route
+  update_nftables
+  start_shadowproxy
+  set_dnsmasq
+}
+
+stop_service() {
+  nft delete table inet shadowproxy-mangle
+  unset_dnsmasq
+}
+
+service_triggers() {
+  procd_add_reload_trigger "shadowproxy"
+  procd_add_interface_trigger "interface.*" "pppoe-wan" /etc/init.d/shadowproxy restart
+}

@@ -1,0 +1,56 @@
+{
+  "locals": [
+    {
+      "local_address": "::",
+      "local_port": "{redir_port}",
+      "protocol": "redir",
+      "tcp_redir": "tproxy",
+      "udp_redir": "tproxy",
+      "acl": "/etc/shadowproxy/shadowproxy-redir.acl"
+    },
+    {
+      "local_address": "::",
+      "local_port": "{dns_port}",
+      "protocol": "dns",
+      "local_dns_address": "{dns_local_addr}",
+      "local_dns_port": 53,
+      "remote_dns_address": "{dns_remote_addr}",
+      "remote_dns_port": 53,
+      "acl": "/etc/shadowproxy/shadowproxy-dns.acl",
+      "client_cache_size": 32,
+      "mode": "udp_only"
+    }
+  ],
+
+  "servers": [
+    "{servers_list}"
+  ],
+
+  "timeout": 5,
+  "keep_alive": 5,
+  "nofile": 51200,
+  "ipv6_first": false,
+  "ipv6_only": false,
+  "outbound_fwmark": 255,
+
+  "balancer": {
+    "max_server_rtt": 5,
+    "check_interval": 120,
+    "check_best_interval": 120
+  },
+
+  "security": {
+    "replay_attack": {
+      "policy": "reject"
+    }
+  },
+
+  "log": {
+    "config_path": "/etc/shadowproxy/log4rs.yml"
+  },
+
+  "runtime": {
+    "mode": "multi_thread",
+    "worker_count": "{worker_count}"
+  }
+}
