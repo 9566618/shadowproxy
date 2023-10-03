@@ -1,25 +1,26 @@
 name: build ipk files
 jobs:
-  name: ${{ matrix.arch }} build
-  runs-on: ubuntu-latest
-  strategy:
-    matrix:
-      arch:
-        - aarch64
+  build:
+    name: ${{ matrix.arch }} build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch:
+          - aarch64
 
-  steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-    - name: Build
-      uses: openwrt/gh-action-sdk@main
-      env:
-        ARCH: ${{ matrix.arch }}
+      - name: Build
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}
 
-    - name: Store packages
-      uses: actions/upload-artifact@v3
-      with:
-        name: ${{ matrix.arch}}-packages
-        path: bin/packages/${{ matrix.arch }}/packages/*.ipk
+      - name: Store packages
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.arch}}-packages
+          path: bin/packages/${{ matrix.arch }}/packages/*.ipk
 
