@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         arch:
-          - rockchip-armv8
+          - aarch64_generic
         branch:
           - openwrt-22.03
 
