@@ -23,6 +23,7 @@ jobs:
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}
+          PACKAGES: "shadowproxy"
 
       - name: Store packages
         uses: actions/upload-artifact@v3
