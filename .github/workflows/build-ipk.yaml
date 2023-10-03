@@ -3,7 +3,7 @@ on:
   push:
     tags:
       - '**'
-  workflow_dispatch:
+#  workflow_dispatch:
 
 jobs:
   build:
@@ -12,7 +12,9 @@ jobs:
     strategy:
       matrix:
         arch:
-          - rockchip-armv8-openwrt-22.03
+          - rockchip-armv8
+        branch:
+          - openwrt-22.03
 
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +25,7 @@ jobs:
       - name: Build
         uses: openwrt/gh-action-sdk@main
         env:
-          ARCH: ${{ matrix.arch }}
+          ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           PACKAGES: "shadowproxy"
           FEED_DIR: ${{ github.workspace }}
 
