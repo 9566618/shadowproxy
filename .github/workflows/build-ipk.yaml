@@ -33,7 +33,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.arch}}-packages
-          path: bin/packages/${{ matrix.arch }}/packages/*.ipk
+          path: bin/packages/${{ matrix.arch }}/action/*.ipk
 
       - name: Release
         uses: softprops/action-gh-release@v1
