@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         arch:
-          - aarch64
+          - rockchip-armv8-openwrt-22.03
 
     steps:
       - uses: actions/checkout@v4
@@ -30,3 +30,9 @@ jobs:
           name: ${{ matrix.arch}}-packages
           path: bin/packages/${{ matrix.arch }}/packages/*.ipk
 
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "bin/packages/${{ matrix.arch }}/action/*.ipk"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
