@@ -1,4 +1,9 @@
 name: build ipk files
+on:
+  push:
+    tags:
+      - '**'
+
 jobs:
   build:
     name: ${{ matrix.arch }} build
