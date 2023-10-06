@@ -1,0 +1,6 @@
+# by default, the proxy has a default list.
+# if you want to add other domains to proxy, list the domains here
+# for example: `google.com`, which equals `*.google.com`.
+# it will proxy all domains end with `google.com`
+
+# google.com

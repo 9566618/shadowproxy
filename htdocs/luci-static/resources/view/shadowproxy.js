@@ -2,6 +2,8 @@
 'require view';
 'require form';
 'require fs';
+'require rpc';
+'require uci';
 
 var methods = [
     "none",
@@ -29,7 +31,18 @@ var methods = [
 ]
 
 var page = view.extend({
-    render: function () {
+    callStatus: rpc.declare({
+        object: "service",
+        method: "list",
+        params: ["name"],
+        expect: { "shadowproxy": {} }
+    }),
+
+    load: function() {
+        return Promise.all([this.callStatus()]);
+    },
+
+    render: function (data) {
         var m, s, o;
 
         m = new form.Map('shadowproxy', _('ShadowProxy'),
@@ -37,6 +50,30 @@ var page = view.extend({
 
         s = m.section(form.TypedSection, 'main', _('Main Settings'));
         s.anonymous = true;
+
+        o = s.option(form.Flag, 'running', _('Enabled'));
+        o.cfgvalue = function (section_id) {
+            try {
+                return data[0]["instances"]["shadowproxy"]["running"];
+            } catch (e) {
+                return false;
+            }
+        };
+        o.write = function (section_id, formvalue) {
+            var value = this.cfgvalue(section_id);
+            if (value == formvalue) {
+                return
+            }
+            if (formvalue == false) {
+                uci.set("shadowproxy", section_id, "enabled", "0");
+            } else {
+                uci.set("shadowproxy", section_id, "enabled", "1");
+            }
+
+            return uci.set("shadowproxy", section_id, "running", formvalue);
+        };
+        o.rmempty = false;
+
         o = s.option(form.Value, 'redir_port', _('Redir Port'),
             _('redir local listening port'));
         o.datatype = 'port'
@@ -82,11 +119,11 @@ var page = view.extend({
         o.password = true;
         o.modalonly = true;
 
-        o = s.option(form.Value, 'plugin', _('Plugin'));
-        o.modalonly = true;
-
-        o = s.option(form.Value, 'plugin_opts', _('Plugin Options'));
-        o.modalonly = true;
+        // o = s.option(form.Value, 'plugin', _('Plugin'));
+        // o.modalonly = true;
+        //
+        // o = s.option(form.Value, 'plugin_opts', _('Plugin Options'));
+        // o.modalonly = true;
 
         s = m.section(form.TypedSection, 'acl', _('ACL Settings'),
             _('set acl rules for proxy domains and white ip list'));
@@ -94,7 +131,7 @@ var page = view.extend({
         s.tab('domain', _('Proxy Domain'));
         s.tab('bypass_ipset', _('Bypass Ipset'));
 
-        var proxy_domain_file = '/etc/shadowproxy/shadowproxy-dns.acl'
+        var proxy_domain_file = '/etc/shadowproxy/proxy_domains.acl'
         o = s.taboption("domain", form.TextValue, 'proxy_domain_list', "",
             _("proxy the target domains"));
         o.rows = 24;

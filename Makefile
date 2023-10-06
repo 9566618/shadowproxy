@@ -53,4 +53,13 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_BIN) ./bin/$(PKG_TARGET_FILE) $(1)/usr/bin
 endef
 
+define Package/$(PKG_NAME)/postinst
+[ -n "$${IPKG_INSTROOT}" ] || { \
+	rm -f /tmp/luci-indexcache.*
+	rm -rf /tmp/luci-modulecache/
+	killall -HUP rpcd 2>/dev/null
+	exit 0
+}
+endef
+
 $(eval $(call BuildPackage,$(PKG_NAME)))

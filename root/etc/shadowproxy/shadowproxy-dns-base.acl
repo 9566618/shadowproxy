@@ -4,6 +4,9 @@
 [bypass_all]
 
 [proxy_list]
+{proxy_domains}
+
+[proxy_list]
 (^|\.)afreecatv\.com
 (^|\.)agnesb\.fr
 (^|\.)akiba-web\.com

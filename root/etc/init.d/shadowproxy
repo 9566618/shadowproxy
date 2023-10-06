@@ -18,8 +18,17 @@ TPROXY_PORT=60080
 DNS_PORT=5300
 SERVER_LIST_V4=""
 SERVER_LIST_V6=""
+ENABLED="0"
 
 uci_load "$NAME"
+
+_info() {
+  logger -p 6 -t $NAME "$1"
+}
+
+_error() {
+  logger -p 3 -t $NAME "$1"
+}
 
 parse_config_main() {
   section_name="$1"
@@ -28,12 +37,14 @@ parse_config_main() {
   local dns_remote_addr
   local dns_local_addr
   local worker_count
+  local enabled
 
   config_get redir_port "$section_name" redir_port
   config_get dns_port "$section_name" dns_port
   config_get dns_remote_addr "$section_name" dns_remote_addr
   config_get dns_local_addr "$section_name" dns_local_addr
   config_get worker_count "$section_name" worker_count
+  config_get enabled "$section_name" enabled
 
   if [ "$redir_port" != "$TPROXY_PORT" ]; then
     TPROXY_PORT=$redir_port
@@ -42,6 +53,8 @@ parse_config_main() {
   if [ "$dns_port" != "$DNS_PORT" ]; then
     DNS_PORT=$dns_port
   fi
+
+  ENABLED=$enabled
 
   # sed replace the template string
   sed -i "s/\"{redir_port}\"/${redir_port}/g" "$CONF_DIR/config.json"
@@ -140,6 +153,24 @@ update_nftables() {
   fi
 }
 
+update_proxy_domains() {
+  cp -f "$CONF_DIR/shadowproxy-dns-base.acl" "$CONF_DIR/shadowproxy-dns.acl"
+
+  domain_list=""
+  for item in $(grep -v '^$' /etc/shadowproxy/proxy_domains.acl | grep -v '^#'); do
+    # escape two times
+    domain="$(echo ".${item}" | sed 's/\./\\\\\./g')"
+    _info "proxy domain: $domain"
+
+    if [ -n "${domain_list}" ]; then
+      domain_list="${domain_list}\n"
+    fi
+    domain_list="${domain_list}${domain}"
+  done
+
+  sed -i "s/{proxy_domains}/${domain_list}/g" "$CONF_DIR/shadowproxy-dns.acl"
+}
+
 start_shadowproxy() {
   procd_open_instance shadowproxy
   procd_set_param command /usr/bin/sslocal -c /etc/shadowproxy/config.json
@@ -169,31 +200,54 @@ set_dnsmasq() {
 }
 
 unset_dnsmasq() {
-    uci -q delete dhcp.@dnsmasq[0].server
-    uci -q delete dhcp.@dnsmasq[0].noresolv
-    uci commit dhcp
-    /etc/init.d/dnsmasq reload
+  uci -q delete dhcp.@dnsmasq[0].server
+  uci -q delete dhcp.@dnsmasq[0].noresolv
+  uci commit dhcp
+  /etc/init.d/dnsmasq reload
 }
 
 start_service() {
+  _info "start shadowproxy service."
   if [ -z "$(command -v /usr/bin/sslocal)" ]; then
-    echo "/usr/bin/sslocal is not exist, please install it."
-    exit 1
+    _error "/usr/bin/sslocal is not exist, please install it."
+    return 1
   fi
+
   generate_config_json
+
+  if [ "${ENABLED}" = "0" ]; then
+    _info "service shadowproxy not enabled"
+    return 0
+  fi
+
+  if [ -z "${SERVER_LIST_STR}" ]; then
+    _info "no enabled server, exit"
+    return 1
+  fi
+
   config_sysctl
   config_route
   update_nftables
+  update_proxy_domains
   start_shadowproxy
   set_dnsmasq
 }
 
 stop_service() {
-  nft delete table inet shadowproxy-mangle
+  _info "stop shadowproxy service."
+
+  if [ -n "$(nft list tables | grep shadowproxy-mangle)" ]; then
+    nft delete table inet shadowproxy-mangle
+  fi
   unset_dnsmasq
 }
 
 service_triggers() {
   procd_add_reload_trigger "shadowproxy"
   procd_add_interface_trigger "interface.*" "pppoe-wan" /etc/init.d/shadowproxy restart
+}
+
+reload_service() {
+  stop
+  start
 }

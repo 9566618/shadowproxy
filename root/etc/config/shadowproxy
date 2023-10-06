@@ -1,5 +1,6 @@
 
 config main
+    option enabled '0'
 	option redir_port '60080'
 	option dns_port '5300'
 	option dns_remote_addr '1.1.1.1'
