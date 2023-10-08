@@ -74,6 +74,16 @@ var page = view.extend({
         };
         o.rmempty = false;
 
+        o = s.option(form.Value, 'socks_port', _('Socks Port'),
+            _('socks5 proxy local listening port, set 0 to disable it'));
+        o.datatype = 'port'
+        o.rmempty = false;
+
+        o = s.option(form.Value, 'http_port', _('Http Port'),
+            _('http proxy local listening port, set 0 to disable it'));
+        o.datatype = 'port'
+        o.rmempty = false;
+
         o = s.option(form.Value, 'redir_port', _('Redir Port'),
             _('redir local listening port'));
         o.datatype = 'port'
@@ -96,7 +106,7 @@ var page = view.extend({
 
         o = s.option(form.Value, 'worker_count', _('Worker Count'),
             _('thread worker count for processing connections'))
-        o.datatype = 'range(3,128)';
+        o.datatype = 'range(3,512)';
         o.rmempty = false;
 
         s = m.section(form.GridSection, 'server', _('Servers'));
@@ -144,6 +154,13 @@ var page = view.extend({
                 if (value == formvalue) {
                     return
                 }
+                // trigger the config value to allow save&apply
+                var v = uci.get("shadowproxy", section_id, "proxy_domain_list");
+                if (v == "0") {
+                    uci.set("shadowproxy", section_id, "proxy_domain_list", "1");
+                } else {
+                    uci.set("shadowproxy", section_id, "proxy_domain_list", "0");
+                }
                 return fs.write(proxy_domain_file, formvalue.trim().replace(/\r\n/g, '\n') + '\n');
             });
         };
@@ -160,6 +177,12 @@ var page = view.extend({
             return this.cfgvalue(section_id).then(function (value) {
                 if (value == formvalue) {
                     return
+                }
+                var v = uci.get("shadowproxy", section_id, "bypass_ipset_list");
+                if (v == "0") {
+                    uci.set("shadowproxy", section_id, "bypass_ipset_list", "1");
+                } else {
+                    uci.set("shadowproxy", section_id, "bypass_ipset_list", "0");
                 }
                 return fs.write(bypass_ipset_file, formvalue.trim().replace(/\r\n/g, '\n') + '\n');
             });

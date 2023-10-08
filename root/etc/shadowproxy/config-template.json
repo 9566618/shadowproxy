@@ -1,6 +1,17 @@
 {
   "locals": [
     {
+      "disabled": "{socks_disabled}",
+      "local_address": "::",
+      "local_port": "{socks_port}"
+    },
+    {
+      "disabled": "{http_disabled}",
+      "local_address": "::",
+      "local_port": "{http_port}",
+      "protocol": "http"
+    },
+    {
       "local_address": "::",
       "local_port": "{redir_port}",
       "protocol": "redir",

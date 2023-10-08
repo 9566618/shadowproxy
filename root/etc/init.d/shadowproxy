@@ -18,7 +18,7 @@ TPROXY_PORT=60080
 DNS_PORT=5300
 SERVER_LIST_V4=""
 SERVER_LIST_V6=""
-ENABLED="0"
+ENABLED="$(uci -q get shadowproxy.@main[0].enabled)"
 
 uci_load "$NAME"
 
@@ -37,14 +37,16 @@ parse_config_main() {
   local dns_remote_addr
   local dns_local_addr
   local worker_count
-  local enabled
+  local socks_port
+  local http_port
 
   config_get redir_port "$section_name" redir_port
   config_get dns_port "$section_name" dns_port
   config_get dns_remote_addr "$section_name" dns_remote_addr
   config_get dns_local_addr "$section_name" dns_local_addr
   config_get worker_count "$section_name" worker_count
-  config_get enabled "$section_name" enabled
+  config_get socks_port "$section_name" socks_port
+  config_get http_port "$section_name" http_port
 
   if [ "$redir_port" != "$TPROXY_PORT" ]; then
     TPROXY_PORT=$redir_port
@@ -54,7 +56,21 @@ parse_config_main() {
     DNS_PORT=$dns_port
   fi
 
-  ENABLED=$enabled
+  if [ "$socks_port" != "0" ]; then
+    sed -i "s/\"{socks_disabled}\"/false/g" "$CONF_DIR/config.json"
+    sed -i "s/\"{socks_port}\"/${socks_port}/g" "$CONF_DIR/config.json"
+  else
+    sed -i "s/\"{socks_disabled}\"/true/g" "$CONF_DIR/config.json"
+    sed -i "s/\"{socks_port}\"/1080/g" "$CONF_DIR/config.json"
+  fi
+
+  if [ "$http_port" != "0" ]; then
+    sed -i "s/\"{http_disabled}\"/false/g" "$CONF_DIR/config.json"
+    sed -i "s/\"{http_port}\"/${http_port}/g" "$CONF_DIR/config.json"
+  else
+    sed -i "s/\"{http_disabled}\"/true/g" "$CONF_DIR/config.json"
+    sed -i "s/\"{http_port}\"/1080/g" "$CONF_DIR/config.json"
+  fi
 
   # sed replace the template string
   sed -i "s/\"{redir_port}\"/${redir_port}/g" "$CONF_DIR/config.json"
@@ -200,6 +216,11 @@ set_dnsmasq() {
 }
 
 unset_dnsmasq() {
+  # the shadowproxy is enabled, do not
+  if [ "$ENABLED" = "1" ]; then
+    return 0
+  fi
+
   uci -q delete dhcp.@dnsmasq[0].server
   uci -q delete dhcp.@dnsmasq[0].noresolv
   uci commit dhcp
