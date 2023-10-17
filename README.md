@@ -36,7 +36,7 @@ TODO
 - [x] support to enable socks&http proxy
 - [ ] ~~support plugins~~
 - [ ] ~~support iptables for openwrt-21~~
-- [ ] support x86_64-musl and gnu platforms
+- [x] support x86_64-musl platforms
 - [x] support more shadowsocks-rust configurations
 
 Q&A
@@ -64,4 +64,5 @@ Q&A
 7. How to support openwrt-21
    - Check the [openwrt nftables doc](https://openwrt.org/docs/guide-user/firewall/misc/nftables)
    - opkg update && opkg install nftables kmod-nft-tproxy
-
+8. How to set up shadowsocks-rust server
+   - the x86-64 gnu file `ssserver` is also supplied.  
