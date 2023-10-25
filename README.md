@@ -38,6 +38,7 @@ TODO
 - [ ] ~~support iptables for openwrt-21~~
 - [x] support x86_64-musl platforms
 - [x] support more shadowsocks-rust configurations
+- [ ] support multi GFW blocked countries (any help is welcome) 
 
 Q&A
 ---
@@ -59,10 +60,12 @@ Q&A
 5. Why plugins are not suggested?
    - the plugins support in shadowsocks-rust, it starts another child process to auto proxy packets. which consumes hardware resources. And in such case, it is recommended that using v2ray or clash directly. 
 6. What is `err_cert_common_name_invalid`
-   - It caused by the ipv4 and ipv6 rotate changes. When it has dns cache in transparent proxy, which could be resolved as ipv6 address. However, the proxy server accesses the address with ipv4 outbound interface. It crashes. So it is better to configure both ipv4 and ipv6 servers, which stands for the same target VPS server. 
-   - And, if it does not resolve, restart the dnsmasq.
+   - It caused by the ipv4 and ipv6 rotate changes. When it has dns cache in transparent proxy, which could be resolved as ipv6 address. However, the proxy server accesses the address with ipv4 outbound interface. It crashes. 
+   - And, if it does not resolve, restart the dnsmasq to clear the dns cache.
 7. How to support openwrt-21
    - Check the [openwrt nftables doc](https://openwrt.org/docs/guide-user/firewall/misc/nftables)
    - opkg update && opkg install nftables kmod-nft-tproxy
 8. How to set up shadowsocks-rust server
    - the x86-64 gnu file `ssserver` is also supplied.  
+9. How to support other countries?
+   - Change the ip set in `chnip4.ips` and `chnip6.ips`, by default, no update is required for `shadowproxy-dns-base.acl`, and redir will proxy all data. Any PR is welcome

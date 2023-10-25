@@ -37,16 +37,16 @@
     "{servers_list}"
   ],
 
-  "timeout": 5,
-  "keep_alive": 5,
-  "nofile": 51200,
+  "timeout": 15,
+  "keep_alive": 15,
+  "nofile": 25600,
   "ipv6_first": false,
   "ipv6_only": false,
   "outbound_fwmark": 255,
 
   "balancer": {
-    "max_server_rtt": 5,
-    "check_interval": 120,
+    "max_server_rtt": 15,
+    "check_interval": 360,
     "check_best_interval": 120
   },
 
