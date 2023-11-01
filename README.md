@@ -8,6 +8,17 @@ It supports to configure shadowsocks-rust tproxy(redir) and dns acl on openwrt, 
 
 Wish it helps.
 
+Install
+---
+
+1. download the last ipk release file.
+2. `System(系统)` -> `Software Package(软件包)` -> `Upload(上传安装)` 
+
+Or `scp` and `opkg install shadowproxy_xxx.ipk`
+
+Configuration
+---
+
 In main setting, it is better to set your local dns server, which could be found in `/tmp/resolve.conf.ppp` or `/tmp/resolv.conf.d/resolv.conf.auto`.
 
 ![main settings](main-setting.png)
@@ -15,6 +26,8 @@ In main setting, it is better to set your local dns server, which could be found
 Add your shadowsocks servers in the server section. It's better to configure both ipv4 and ipv6 for one same server together. It will check which ip route is better to reach the server. 
 
 ![server](server.png)
+
+Click `Save&Apply`
 
 Dependency
 ---
@@ -62,6 +75,7 @@ Q&A
 6. What is `err_cert_common_name_invalid`
    - It caused by the ipv4 and ipv6 rotate changes. When it has dns cache in transparent proxy, which could be resolved as ipv6 address. However, the proxy server accesses the address with ipv4 outbound interface. It crashes. 
    - And, if it does not resolve, restart the dnsmasq to clear the dns cache.
+   - And, restart the browser or clear all caches. 
 7. How to support openwrt-21
    - Check the [openwrt nftables doc](https://openwrt.org/docs/guide-user/firewall/misc/nftables)
    - opkg update && opkg install nftables kmod-nft-tproxy

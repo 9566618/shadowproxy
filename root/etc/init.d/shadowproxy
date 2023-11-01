@@ -211,7 +211,6 @@ set_dnsmasq() {
   uci -q delete dhcp.@dnsmasq[0].server
   uci -q add_list dhcp.@dnsmasq[0].server="$addr"
   uci -q set dhcp.@dnsmasq[0].noresolv=1
-  uci -q set dhcp.@dnsmasq[0].cachesize=10000
   uci commit dhcp
   /etc/init.d/dnsmasq reload
 }
@@ -224,7 +223,6 @@ unset_dnsmasq() {
 
   uci -q delete dhcp.@dnsmasq[0].server
   uci -q delete dhcp.@dnsmasq[0].noresolv
-  uci -q delete dhcp.@dnsmasq[0].cachesize
   uci commit dhcp
   /etc/init.d/dnsmasq reload
 }
