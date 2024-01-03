@@ -51,6 +51,7 @@ TODO
 - [ ] ~~support iptables for openwrt-21~~
 - [x] support x86_64-musl platforms
 - [x] support more shadowsocks-rust configurations
+- [ ] add shadowsocks server configuration bash script 
 - [ ] support multi GFW blocked countries (any help is welcome) 
 
 Q&A
