@@ -17,6 +17,7 @@
       "protocol": "redir",
       "tcp_redir": "tproxy",
       "udp_redir": "tproxy",
+      "mode": "tcp_and_udp",
       "acl": "/etc/shadowproxy/shadowproxy-redir.acl"
     },
     {
