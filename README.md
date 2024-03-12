@@ -71,6 +71,7 @@ Q&A
     - The `/etc/init.d/shadowproxy` will config `dnsmasq` server automatically. If you did not set the correct server, you may not be able to reach network, because no dns server available. Configure your server and save apply.
 4. Supported Devices
    - aarch64-musl (armv8)
+   - x86_64-musl
 5. Why plugins are not suggested?
    - the plugins support in shadowsocks-rust, it starts another child process to auto proxy packets. which consumes hardware resources. And in such case, it is recommended that using v2ray or clash directly. 
 6. What is `err_cert_common_name_invalid`
@@ -84,3 +85,6 @@ Q&A
    - the x86-64 gnu file `ssserver` is also supplied.  
 9. How to support other countries?
    - Change the ip set in `chnip4.ips` and `chnip6.ips`, by default, no update is required for `shadowproxy-dns-base.acl`, and redir will proxy all data. Any PR is welcome
+10. How to use both IPV4 and IPV6?
+   - If your local network enabled IPV6, then you'd better configure an IPV6 server. Or you could not connect, for some domains are resolved with ipv6 addresses.
+   - If you only have IPV4 locally, you can use an IPV4 server only. For some VPS servers, only IPV4 available.
