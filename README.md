@@ -40,20 +40,6 @@ Configuration
 
 All configuration files are under `/etc/shadowproxy`. A `config-template.json` file is updated by the `/etc/init.d/shadowproxy` with uci configuration from `/etc/config/shadowproxy`.
 
-
-TODO
----
-
-- [x] enable/disable service
-- [x] .github action to package ipk
-- [x] support to enable socks&http proxy
-- [ ] ~~support plugins~~
-- [ ] ~~support iptables for openwrt-21~~
-- [x] support x86_64-musl platforms
-- [x] support more shadowsocks-rust configurations
-- [ ] add shadowsocks server configuration bash script 
-- [ ] support multi GFW blocked countries (any help is welcome) 
-
 Q&A
 ---
 
@@ -72,12 +58,11 @@ Q&A
 4. Supported Devices
    - aarch64-musl (armv8)
    - x86_64-musl
+   - x86_64-gnu
 5. Why plugins are not suggested?
    - the plugins support in shadowsocks-rust, it starts another child process to auto proxy packets. which consumes hardware resources. And in such case, it is recommended that using v2ray or clash directly. 
 6. What is `err_cert_common_name_invalid`
-   - It caused by the ipv4 and ipv6 rotate changes. When it has dns cache in transparent proxy, which could be resolved as ipv6 address. However, the proxy server accesses the address with ipv4 outbound interface. It crashes. 
-   - And, if it does not resolve, restart the dnsmasq to clear the dns cache.
-   - And, restart the browser or clear all caches. 
+   - restart the browser or clear all caches. 
 7. How to support openwrt-21
    - Check the [openwrt nftables doc](https://openwrt.org/docs/guide-user/firewall/misc/nftables)
    - opkg update && opkg install nftables kmod-nft-tproxy
@@ -88,3 +73,5 @@ Q&A
 10. How to use both IPV4 and IPV6?
    - If your local network enabled IPV6, then you'd better configure an IPV6 server. Or you could not connect, for some domains are resolved with ipv6 addresses.
    - If you only have IPV4 locally, you can use an IPV4 server only. For some VPS servers, only IPV4 available.
+11. How does DNS resolved?
+   - dnsmasq is still the main dns server. But dnsmasq will reroute packets to upstream, which is our local dns server. the local dns server would reroute the packets to remote overseas public dns server based on the acl table.  
