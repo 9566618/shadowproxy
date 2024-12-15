@@ -1,0 +1,32 @@
+{
+  "servers": [
+    {
+      "server": "::",
+      "server_port": 8081,
+      "password": "password",
+      "method": "aes-256-gcm",
+      "mode": "tcp_and_udp"
+    }
+  ],
+
+  "nofile": 30240,
+  "ipv6_first": false,
+  "ipv6_only": false,
+  "outbound_fwmark": 61888,
+  "udp_timeout": 300,
+
+  "security": {
+    "replay_attack": {
+      "policy": "reject"
+    }
+  },
+
+  "log": {
+    "config_path": "/etc/shadowsocks/log4rs.yml"
+  },
+
+  "runtime": {
+    "mode": "multi_thread",
+    "worker_count": 256
+  }
+}
