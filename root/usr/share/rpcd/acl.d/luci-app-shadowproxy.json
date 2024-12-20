@@ -3,7 +3,8 @@
     "description": "Grant access to shadowproxy",
     "read": {
       "ubus": {
-        "uci": [ "get" ]
+        "uci": [ "get" ],
+        "service": [ "list" ]
       },
       "file": {
         "/usr/bin/sslocal": [ "exec" ],

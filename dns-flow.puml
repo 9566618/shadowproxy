@@ -1,0 +1,20 @@
+@startuml
+'https://plantuml.com/sequence-diagram
+
+autonumber
+
+Browser -> DNSmasq: 浏览器查询当前域名
+DNSmasq -> Shadowsocks: 转发查询请求到本地\nShadowsocks的DNS服务
+autonumber 3.1.1
+Shadowsocks -> LocalDnsServer: 如果不在代理域名列表内，查询国内DNS服务器
+Shadowsocks <- LocalDnsServer: 返回国内服务的真实IP
+autonumber inc B
+Shadowsocks -> VPS: 如果在代理域名列表中，发送到Shadowsocks服务端
+VPS -> RemoteDnsServer: 查询境外DNS服务器
+VPS <- RemoteDnsServer: 返回境外DNS查询的域名IP
+Shadowsocks <- VPS: 返回境外DNS获取的真实IP地址
+autonumber 4
+DNSmasq <- Shadowsocks: 返回可靠的IP查询结果
+Browser <- DNSmasq: 返回真实域名IP
+
+@enduml

@@ -8,7 +8,7 @@ config main
 	option dns_remote_addr '1.1.1.1'
 	option dns_local_addr '223.5.5.5'
 	option proxy_all_dns '1'
-	option worker_count 64
+	option worker_count 16
 
 config server
     option enabled '1'

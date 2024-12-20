@@ -1,0 +1,40 @@
+@startuml
+'https://plantuml.com/sequence-diagram
+participant Browser
+participant OpenWRT
+participant Shadowsocks
+participant ChinaNetwork
+participant VPS
+participant GlobalNetwork
+
+autonumber
+
+Browser -> OpenWRT: 发送网络数据（TCP）请求
+OpenWRT -> OpenWRT: 根据nftable内\n境内IP集分流
+
+alt 若为境内IP
+    autonumber 3.1.1
+    OpenWRT -> ChinaNetwork: 若为境内IP，直接访问
+    OpenWRT <- ChinaNetwork: 返回境内网络数据
+else 若为境外IP
+    autonumber inc B
+    OpenWRT -> Shadowsocks: 若为境外IP，转发给Shadowsock代理
+    Shadowsocks -> Shadowsocks: 根据内部IP集合分流
+    alt 若在内部IP集合内
+        autonumber 3.2.2.1.1
+        Shadowsocks -> ChinaNetwork: 若在内部IP集合内
+        Shadowsocks <- ChinaNetwork: 返回代理网络数据
+    else 若不在内部IP集合内
+        autonumber inc D
+        Shadowsocks -> VPS: 若不在内部IP集合内
+        VPS -> GlobalNetwork: 获取目标地址网络数据
+        VPS <- GlobalNetwork: 返回网络数据
+        Shadowsocks <- VPS: 返回代理网络数据
+    end
+    autonumber 3.2.3
+    OpenWRT <- Shadowsocks: 返回可靠网络数据
+end
+autonumber 4
+Browser <- OpenWRT: 返回请求数据
+
+@enduml
