@@ -28,6 +28,9 @@ var methods = [
     "chacha20-ietf",
     "chacha20-ietf-poly1305",
     "xchacha20-ietf-poly1305",
+    "2022-blake3-aes-128-gcm",
+    "2022-blake3-aes-256-gcm",
+    "2022-blake3-chacha20-poly1305",
 ]
 
 var page = view.extend({
@@ -106,7 +109,7 @@ var page = view.extend({
 
         o = s.option(form.Value, 'worker_count', _('Worker Count'),
             _('thread worker count for processing connections'))
-        o.datatype = 'range(3,512)';
+        o.datatype = 'range(1,256)';
         o.rmempty = false;
 
         s = m.section(form.GridSection, 'server', _('Servers'));
