@@ -17,6 +17,8 @@ jobs:
         arch:
           - aarch64_generic
           - x86_64
+          - mips_24kc
+          - mipsel_24kc
         branch:
           - openwrt-22.03
 
@@ -34,7 +36,7 @@ jobs:
           FEED_DIR: ${{ github.workspace }}
 
       - name: Store packages
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.arch}}-packages
           path: bin/packages/${{ matrix.arch }}/action/*.ipk
