@@ -69,7 +69,7 @@ parse_config_main() {
     sed -i "s/\"{http_port}\"/${http_port}/g" "$CONF_DIR/config.json"
   else
     sed -i "s/\"{http_disabled}\"/true/g" "$CONF_DIR/config.json"
-    sed -i "s/\"{http_port}\"/1080/g" "$CONF_DIR/config.json"
+    sed -i "s/\"{http_port}\"/1081/g" "$CONF_DIR/config.json"
   fi
 
   # sed replace the template string
@@ -124,7 +124,7 @@ generate_config_json() {
   config_foreach parse_config_main main
 
   config_foreach parse_config_server server
-  sed -i "s/\"{servers_list}\"/${SERVER_LIST_STR}/g" "$CONF_DIR/config.json"
+  sed -i "s|\"{servers_list}\"|${SERVER_LIST_STR}|g" "$CONF_DIR/config.json"
 }
 
 config_sysctl() {
