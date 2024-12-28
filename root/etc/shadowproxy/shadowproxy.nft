@@ -63,14 +63,26 @@ table inet shadowproxy-mangle {
         elements=$chnip6
     }
 
+    set dns_v4 {                                            
+        type ipv4_addr                                              
+        elements = { 8.8.8.8, 8.8.4.4 }                                                    
+    }                                                                                                                        
+                                                                                                        
+    set dns_v6 {                                                                                  
+        type ipv6_addr                 
+        elements = { 2001:4860:4860::8888, 2001:4860:4860::8844 }
+    } 
+
     chain shadowproxy_input {
         type filter hook prerouting priority mangle; policy accept;
         ip daddr @whitelist_v4_set return comment "bypass whitelist_v4"
         ip6 daddr @whitelist_v6_set return comment "bypass whitelist_v6"
         ip daddr @chnip4_set return comment "bypass chnip4"
-		ip6 daddr @chnip6_set return comment "bypass chnip6"
+	ip6 daddr @chnip6_set return comment "bypass chnip6"
         meta l4proto tcp meta mark set 1 tproxy to :$tproxy_port accept comment "only proxy tcp"
-        meta l4proto udp th dport {53, 80, 443} meta mark set 1 tproxy to :$tproxy_port accept comment "support http3 quic"
+        meta l4proto udp th dport {80, 443} meta mark set 1 tproxy to :$tproxy_port accept comment "support http3 quic"
+	ip daddr @google_dns_v4 udp dport 53 meta mark set 1 tproxy ip to :$tproxy_port accept comment "support dns"
+	ip6 daddr @google_dns_v6 udp dport 53 meta mark set 1 tproxy ip6 to :$tproxy_port accept comment "support dns"
     }
 
     chain shadowproxy_output {
@@ -82,7 +94,9 @@ table inet shadowproxy-mangle {
 		ip daddr @chnip4_set return comment "bypass chnip4"
 		ip6 daddr @chnip6_set return comment "bypass chnip6"
 		meta l4proto tcp meta mark set 0x00000001 accept comment "reroute to proxy"
-		meta l4proto udp th dport {53, 80, 443} meta mark set 0x00000001 accept comment "support http3 quic"
+		meta l4proto udp th dport {80, 443} meta mark set 0x00000001 accept comment "support http3 quic"
+		ip daddr @dns_v4 udp dport 53 meta mark set 1 accept comment "support dns"
+		ip6 daddr @dns_v6 udp dport 53 meta mark set 1 accept comment "support dns"
     }
 
 }
