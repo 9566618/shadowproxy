@@ -63,40 +63,47 @@ table inet shadowproxy-mangle {
         elements=$chnip6
     }
 
-    set dns_v4 {                                            
-        type ipv4_addr                                              
-        elements = { 8.8.8.8, 8.8.4.4 }                                                    
-    }                                                                                                                        
-                                                                                                        
-    set dns_v6 {                                                                                  
-        type ipv6_addr                 
+    set dns_v4 {
+        type ipv4_addr
+        elements = { 8.8.8.8, 8.8.4.4 }
+    }
+
+    set dns_v6 {
+        type ipv6_addr
         elements = { 2001:4860:4860::8888, 2001:4860:4860::8844 }
-    } 
+    }
+
+    set ignored_udp_ports {
+        type inet_service
+        elements = {
+            53,
+        }
+    }
 
     chain shadowproxy_input {
         type filter hook prerouting priority mangle; policy accept;
         ip daddr @whitelist_v4_set return comment "bypass whitelist_v4"
         ip6 daddr @whitelist_v6_set return comment "bypass whitelist_v6"
         ip daddr @chnip4_set return comment "bypass chnip4"
-	ip6 daddr @chnip6_set return comment "bypass chnip6"
-        meta l4proto tcp meta mark set 1 tproxy to :$tproxy_port accept comment "only proxy tcp"
-        meta l4proto udp th dport {80, 443} meta mark set 1 tproxy to :$tproxy_port accept comment "support http3 quic"
-	ip daddr @dns_v4 udp dport 53 meta mark set 1 tproxy ip to :$tproxy_port accept comment "support dns"
-	ip6 daddr @dns_v6 udp dport 53 meta mark set 1 tproxy ip6 to :$tproxy_port accept comment "support dns"
+        ip6 daddr @chnip6_set return comment "bypass chnip6"
+        meta l4proto tcp meta mark set 1 tproxy to :$tproxy_port accept comment "proxy tcp"
+        ip daddr @dns_v4 udp dport 53 meta mark set 1 tproxy ip to :$tproxy_port accept comment "support ipv4 dns"
+        ip6 daddr @dns_v6 udp dport 53 meta mark set 1 tproxy ip6 to :$tproxy_port accept comment "support ipv6 dns"
+        meta l4proto udp th dport != @ignored_udp_ports meta mark set 1 tproxy to :$tproxy_port accept comment "proxy udp"
     }
 
     chain shadowproxy_output {
-		type route hook output priority mangle; policy accept;
-		meta l4proto tcp ct direction reply return comment "tcp conntrack"
-		meta mark 0x000000ff return comment "bypass sslocal fwmark 255"
-		ip daddr @whitelist_v4_set return comment "bypass whitelist_v4"
-		ip6 daddr @whitelist_v6_set return comment "bypass whitelist_v6"
-		ip daddr @chnip4_set return comment "bypass chnip4"
-		ip6 daddr @chnip6_set return comment "bypass chnip6"
-		meta l4proto tcp meta mark set 0x00000001 accept comment "reroute to proxy"
-		meta l4proto udp th dport {80, 443} meta mark set 0x00000001 accept comment "support http3 quic"
-		ip daddr @dns_v4 udp dport 53 meta mark set 1 accept comment "support dns"
-		ip6 daddr @dns_v6 udp dport 53 meta mark set 1 accept comment "support dns"
+        type route hook output priority mangle; policy accept;
+        meta l4proto tcp ct direction reply return comment "tcp conntrack"
+        meta mark 0x000000ff return comment "bypass sslocal fwmark 255"
+        ip daddr @whitelist_v4_set return comment "bypass whitelist_v4"
+        ip6 daddr @whitelist_v6_set return comment "bypass whitelist_v6"
+        ip daddr @chnip4_set return comment "bypass chnip4"
+        ip6 daddr @chnip6_set return comment "bypass chnip6"
+        meta l4proto tcp meta mark set 0x00000001 accept comment "reroute tcp to proxy"
+        ip daddr @dns_v4 udp dport 53 meta mark set 1 accept comment "support ipv4 dns"
+        ip6 daddr @dns_v6 udp dport 53 meta mark set 1 accept comment "support ipv6 dns"
+        meta l4proto udp th dport != @ignored_udp_ports meta mark set 0x00000001 accept comment "reroute udp to proxy"
     }
 
 }
