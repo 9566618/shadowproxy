@@ -1,0 +1,5 @@
+define extramac = {
+  00:00:00:00:00:00 }
+
+define bypassmac = {
+  00:00:00:00:00:00 }
