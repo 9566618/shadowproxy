@@ -34,9 +34,11 @@ define whitelist_v6 = {
 }
 
 #define tproxy_port = 60080
+define extra_tproxy_port = 61405
 
 include "/etc/shadowproxy/chnip4.ips"
 include "/etc/shadowproxy/chnip6.ips"
+include "/etc/shadowproxy/proxymac.ips"
 
 table inet shadowproxy-mangle {
     set whitelist_v4_set {
@@ -80,12 +82,58 @@ table inet shadowproxy-mangle {
         }
     }
 
+    set extradns_v6 {
+        type ipv6_addr
+        elements = { ::1, 2001:4860:4860::8888, 2001:4860:4860::8844 }
+    }
+
+    set extradns_v4 {                                                 
+        type ipv4_addr                                           
+        elements = { 127.0.0.1, 8.8.8.8, 8.8.4.4 }                          
+    }                                                            
+
+    set ignored_udp_ports {
+        type inet_service
+        elements = {
+            53,
+        }
+    }
+
+    set extramac_set {
+        type ether_addr
+        elements = { $extramac }
+    }
+
+    set bypassmac_set {
+        type ether_addr
+        elements = { $bypassmac }
+    }
+    
+    set mac_ip4_set {
+        type ipv4_addr
+        size 65535
+        flags dynamic
+        timeout 12h
+    }
+
+    set mac_ip6_set {
+        type ipv6_addr
+        size 65535
+        flags dynamic
+        timeout 12h
+    }
+
     chain shadowproxy_input {
         type filter hook prerouting priority mangle; policy accept;
         ip daddr @whitelist_v4_set return comment "bypass whitelist_v4"
         ip6 daddr @whitelist_v6_set return comment "bypass whitelist_v6"
         ip daddr @chnip4_set return comment "bypass chnip4"
         ip6 daddr @chnip6_set return comment "bypass chnip6"
+        ether saddr @bypassmac_set return comment "bypass bypassmac"
+        ip saddr @mac_ip4_set ip daddr @extradns_v4 udp dport 53 meta mark set 1 tproxy ip to :$extra_tproxy_port accept
+        ip6 saddr @mac_ip6_set ip6 daddr @extradns_v6 udp dport 53 meta mark set 1 tproxy ip6 to :$extra_tproxy_port accept
+        ip saddr @mac_ip4_set meta l4proto {tcp,udp} meta mark set 1 tproxy ip to :$extra_tproxy_port accept
+        ip6 saddr @mac_ip6_set meta l4proto {tcp,udp} meta mark set 1 tproxy ip6 to :$extra_tproxy_port accept
         meta l4proto tcp meta mark set 1 tproxy to :$tproxy_port accept comment "proxy tcp"
         ip daddr @dns_v4 udp dport 53 meta mark set 1 tproxy ip to :$tproxy_port accept comment "support ipv4 dns"
         ip6 daddr @dns_v6 udp dport 53 meta mark set 1 tproxy ip6 to :$tproxy_port accept comment "support ipv6 dns"
@@ -100,10 +148,20 @@ table inet shadowproxy-mangle {
         ip6 daddr @whitelist_v6_set return comment "bypass whitelist_v6"
         ip daddr @chnip4_set return comment "bypass chnip4"
         ip6 daddr @chnip6_set return comment "bypass chnip6"
+        ether saddr @bypassmac_set return comment "bypass bypassmac"
+        ip saddr @mac_ip4_set ip daddr @extradns_v4 udp dport 53 meta mark set 1 accept
+        ip6 saddr @mac_ip6_set ip6 daddr @extradns_v6 udp dport 53 meta mark set 1 accept
+        ip saddr @mac_ip4_set meta l4proto {tcp,udp} meta mark set 1 accept
+        ip6 saddr @mac_ip6_set meta l4proto {tcp,udp} meta mark set 1 accept
         meta l4proto tcp meta mark set 0x00000001 accept comment "reroute tcp to proxy"
         ip daddr @dns_v4 udp dport 53 meta mark set 1 accept comment "support ipv4 dns"
         ip6 daddr @dns_v6 udp dport 53 meta mark set 1 accept comment "support ipv6 dns"
         meta l4proto udp th dport != @ignored_udp_ports meta mark set 0x00000001 accept comment "reroute udp to proxy"
     }
 
+    chain mac_ip_chain {
+        type filter hook prerouting priority -151; policy accept;
+        ether saddr @extramac_set ip saddr != 0.0.0.0 add @mac_ip4_set { ip saddr }
+        ether saddr @extramac_set ip6 saddr != :: add @mac_ip6_set { ip6 saddr }
+    }
 }
