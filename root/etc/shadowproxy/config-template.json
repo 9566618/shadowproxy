@@ -3,13 +3,8 @@
     {
       "disabled": "{socks_disabled}",
       "local_address": "::",
-      "local_port": "{socks_port}"
-    },
-    {
-      "disabled": "{http_disabled}",
-      "local_address": "::",
-      "local_port": "{http_port}",
-      "protocol": "http"
+      "local_port": "{socks_port}",
+      "mode": "tcp_and_udp"
     },
     {
       "local_address": "::",
@@ -29,8 +24,8 @@
       "remote_dns_address": "{dns_remote_addr}",
       "remote_dns_port": 53,
       "acl": "/etc/shadowproxy/shadowproxy-dns.acl",
-      "client_cache_size": 32,
-      "mode": "udp_only"
+      "client_cache_size": 0,
+      "mode": "tcp_and_udp"
     }
   ],
 
@@ -38,14 +33,15 @@
     "{servers_list}"
   ],
 
-  "timeout": 15,
+  "timeout": 60,
   "keep_alive": 15,
-  "nofile": 1024,
-  "ipv6_first": false,
+  "nofile": 51200,
+  "ipv6_first": true,
   "ipv6_only": false,
   "outbound_fwmark": 255,
   "no_delay": true,
   "fast_open": true,
+  "mptcp": true,
 
   "balancer": {
     "max_server_rtt": 15,
