@@ -127,12 +127,6 @@ generate_config_json() {
   sed -i "s|\"{servers_list}\"|${SERVER_LIST_STR}|g" "$CONF_DIR/config.json"
 }
 
-config_sysctl() {
-  sysctl -e -w net.bridge.bridge-nf-call-arptables=0 > /dev/null
-  sysctl -e -w net.bridge.bridge-nf-call-iptables=0 > /dev/null
-  sysctl -e -w net.bridge.bridge-nf-call-ip6tables=0 > /dev/null
-}
-
 config_route() {
   ip -4 rule del fwmark 0x1 table 803 || true
   ip -4 rule add fwmark 0x1 table 803
@@ -196,35 +190,8 @@ start_shadowproxy() {
   procd_set_param limits core="unlimited"
   procd_set_param stdout 1
   procd_set_param stderr 1
-  procd_set_param limits nofile="20480 20480"
+  procd_set_param limits nofile="51200 51200"
   procd_close_instance
-}
-
-set_dnsmasq() {
-  addr="127.0.0.1#$DNS_PORT"
-  # space in suffix is important
-  OLD_SERVER="$(uci -q get dhcp.@dnsmasq[0].server) "
-  if echo "$OLD_SERVER" | grep "^$addr " >/dev/null 2>&1; then
-    return
-  fi
-
-  uci -q delete dhcp.@dnsmasq[0].server
-  uci -q add_list dhcp.@dnsmasq[0].server="$addr"
-  uci -q set dhcp.@dnsmasq[0].noresolv=1
-  uci commit dhcp
-  /etc/init.d/dnsmasq reload
-}
-
-unset_dnsmasq() {
-  # the shadowproxy is enabled, do not
-  if [ "$ENABLED" = "1" ]; then
-    return 0
-  fi
-
-  uci -q delete dhcp.@dnsmasq[0].server
-  uci -q delete dhcp.@dnsmasq[0].noresolv
-  uci commit dhcp
-  /etc/init.d/dnsmasq reload
 }
 
 start_service() {
@@ -246,12 +213,10 @@ start_service() {
     return 1
   fi
 
-  config_sysctl
   config_route
   update_nftables
   update_proxy_domains
   start_shadowproxy
-  set_dnsmasq
 }
 
 stop_service() {
@@ -260,12 +225,11 @@ stop_service() {
   if [ -n "$(nft list tables | grep shadowproxy-mangle)" ]; then
     nft delete table inet shadowproxy-mangle
   fi
-  unset_dnsmasq
 }
 
 service_triggers() {
   procd_add_reload_trigger "shadowproxy"
-  procd_add_interface_trigger "interface.*" "pppoe-wan" /etc/init.d/shadowproxy restart
+  procd_add_interface_trigger "interface.*" "wan*" /etc/init.d/shadowproxy restart
 }
 
 reload_service() {
