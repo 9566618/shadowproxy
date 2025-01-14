@@ -7,6 +7,12 @@
       "mode": "tcp_and_udp"
     },
     {
+      "disabled": "{http_disabled}",
+      "local_address": "::",
+      "local_port": "{http_port}",
+      "protocol": "http"
+      },
+    {
       "local_address": "::",
       "local_port": "{redir_port}",
       "protocol": "redir",
@@ -41,7 +47,7 @@
   "outbound_fwmark": 255,
   "no_delay": true,
   "fast_open": true,
-  "mptcp": true,
+  "mptcp": false,
 
   "balancer": {
     "max_server_rtt": 15,
