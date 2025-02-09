@@ -29,7 +29,7 @@
       "remote_dns_address": "{dns_remote_addr}",
       "remote_dns_port": 53,
       "acl": "/etc/shadowproxy/shadowproxy-dns.acl",
-      "client_cache_size": 32,
+      "client_cache_size": "{client_cache_size}",
       "mode": "udp_only"
     }
   ],
@@ -39,13 +39,14 @@
   ],
 
   "timeout": 15,
-  "keep_alive": 15,
-  "nofile": 1024,
+  "keep_alive": "{keep_alive}",
+  "nofile": "{nofile}",
   "ipv6_first": false,
   "ipv6_only": false,
   "outbound_fwmark": 255,
-  "no_delay": true,
-  "fast_open": true,
+  "no_delay": "{no_delay}",
+  "fast_open": "{fast_open}",
+  "mptcp": "{mptcp}",
 
   "balancer": {
     "max_server_rtt": 15,

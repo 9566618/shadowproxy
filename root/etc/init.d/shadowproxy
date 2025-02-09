@@ -18,7 +18,7 @@ TPROXY_PORT=60080
 DNS_PORT=5300
 SERVER_LIST_V4=""
 SERVER_LIST_V6=""
-ENABLED="$(uci -q get shadowproxy.@main[0].enabled)"
+ENABLED="$(uci -q get shadowproxy.main.enabled)"
 
 uci_load "$NAME"
 
@@ -36,7 +36,6 @@ parse_config_main() {
   local dns_port
   local dns_remote_addr
   local dns_local_addr
-  local worker_count
   local socks_port
   local http_port
 
@@ -44,7 +43,6 @@ parse_config_main() {
   config_get dns_port "$section_name" dns_port
   config_get dns_remote_addr "$section_name" dns_remote_addr
   config_get dns_local_addr "$section_name" dns_local_addr
-  config_get worker_count "$section_name" worker_count
   config_get socks_port "$section_name" socks_port
   config_get http_port "$section_name" http_port
 
@@ -77,9 +75,47 @@ parse_config_main() {
   sed -i "s/\"{dns_port}\"/${dns_port}/g" "$CONF_DIR/config.json"
   sed -i "s/\"{dns_remote_addr}\"/\"${dns_remote_addr}\"/g" "$CONF_DIR/config.json"
   sed -i "s/\"{dns_local_addr}\"/\"${dns_local_addr}\"/g" "$CONF_DIR/config.json"
-  sed -i "s/\"{worker_count}\"/${worker_count}/g" "$CONF_DIR/config.json"
 }
 
+parse_config_extra() {
+  section_name="$1"
+
+  local worker_count
+  local client_cache_size
+  local no_delay
+  local keep_alive
+  local nofile
+  local fast_open
+  local mptcp
+
+  config_get worker_count "$section_name" worker_count
+  config_get client_cache_size "$section_name" client_cache_size
+  config_get no_delay "$section_name" no_delay
+  config_get keep_alive "$section_name" keep_alive
+  config_get nofile "$section_name" nofile
+  config_get fast_open "$section_name" fast_open
+  config_get mptcp "$section_name" mptcp
+
+  sed -i "s/\"{worker_count}\"/${worker_count}/g" "$CONF_DIR/config.json"
+  sed -i "s/\"{client_cache_size}\"/${client_cache_size}/g" "$CONF_DIR/config.json"
+  sed -i "s/\"{nofile}\"/${nofile}/g" "$CONF_DIR/config.json"
+  sed -i "s/\"{keep_alive}\"/${keep_alive}/g" "$CONF_DIR/config.json"
+  if [ "${no_delay}" == "0" ]; then
+    sed -i "s/\"{no_delay}\"/false/g" "$CONF_DIR/config.json"
+  else
+    sed -i "s/\"{no_delay}\"/true/g" "$CONF_DIR/config.json"
+  fi
+  if [ "${fast_open}" == "0" ]; then
+    sed -i "s/\"{fast_open}\"/false/g" "$CONF_DIR/config.json"
+  else
+    sed -i "s/\"{fast_open}\"/true/g" "$CONF_DIR/config.json"
+  fi
+  if [ "${mptcp}" == "0" ]; then
+    sed -i "s/\"{mptcp}\"/false/g" "$CONF_DIR/config.json"
+  else
+    sed -i "s/\"{mptcp}\"/true/g" "$CONF_DIR/config.json"
+  fi
+}
 
 SERVER_LIST_STR=""
 
@@ -121,7 +157,8 @@ parse_config_server() {
 generate_config_json() {
   cp "$CONF_DIR/config-template.json" "$CONF_DIR/config.json"
 
-  config_foreach parse_config_main main
+  parse_config_main main
+  parse_config_extra settings
 
   config_foreach parse_config_server server
   sed -i "s|\"{servers_list}\"|${SERVER_LIST_STR}|g" "$CONF_DIR/config.json"
@@ -217,9 +254,9 @@ set_dnsmasq() {
 
 unset_dnsmasq() {
   # the shadowproxy is enabled, do not
-  if [ "$ENABLED" = "1" ]; then
-    return 0
-  fi
+#  if [ "$ENABLED" = "1" ]; then
+#    return 0
+#  fi
 
   uci -q delete dhcp.@dnsmasq[0].server
   uci -q delete dhcp.@dnsmasq[0].noresolv

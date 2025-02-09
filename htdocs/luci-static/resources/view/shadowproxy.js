@@ -51,7 +51,7 @@ var page = view.extend({
         m = new form.Map('shadowproxy', _('ShadowProxy'),
             _('ShadowProxy Configuration for tproxy redir and dns'));
 
-        s = m.section(form.TypedSection, 'main', _('Main Settings'));
+        s = m.section(form.NamedSection, 'main', "conf",  _('Main Settings'));
         s.anonymous = true;
 
         o = s.option(form.Flag, 'running', _('Enabled'));
@@ -107,11 +107,6 @@ var page = view.extend({
         o.datatype = 'ipaddr';
         o.rmempty = false;
 
-        o = s.option(form.Value, 'worker_count', _('Worker Count'),
-            _('thread worker count for processing connections'))
-        o.datatype = 'range(1,256)';
-        o.rmempty = false;
-
         s = m.section(form.GridSection, 'server', _('Servers'));
         s.anonymous = true;
         s.addremove = true;
@@ -138,11 +133,12 @@ var page = view.extend({
         // o = s.option(form.Value, 'plugin_opts', _('Plugin Options'));
         // o.modalonly = true;
 
-        s = m.section(form.TypedSection, 'acl', _('ACL Settings'),
-            _('set acl rules for proxy domains and white ip list'));
+        s = m.section(form.NamedSection, 'settings', "conf", _('Advanced Settings'),
+            _('Acl rules and more settings'));
         s.anonymous = true;
         s.tab('domain', _('Proxy Domain'));
         s.tab('bypass_ipset', _('Bypass Ipset'));
+        s.tab('advanced_confs', _('Advanced Configuration'));
 
         var proxy_domain_file = '/etc/shadowproxy/proxy_domains.acl'
         o = s.taboption("domain", form.TextValue, 'proxy_domain_list', "",
@@ -190,6 +186,38 @@ var page = view.extend({
                 return fs.write(bypass_ipset_file, formvalue.trim().replace(/\r\n/g, '\n') + '\n');
             });
         };
+
+        o = s.taboption("advanced_confs", form.Value, 'worker_count', _('Worker Count'),
+            _('thread worker count for processing connections'));
+        o.datatype = 'range(1,1024)';
+        o.rmempty = false;
+
+        o = s.taboption("advanced_confs", form.Value, 'client_cache_size', _('DNS Client Cache Size'),
+            _('should equals the size of max concurrent udp connections'));
+        o.datatype = 'range(8,4096)';
+        o.rmempty = false;
+
+        o = s.taboption("advanced_confs", form.Flag, 'no_delay', _('TCP No Delay'),
+            _('reuse tcp connections or not'));
+        o.rmempty = false;
+
+        o = s.taboption("advanced_confs", form.Value, 'keep_alive', _('TCP Keep Alive'),
+            _('how many seconds to keep the tcp connection'));
+        o.datatype = 'range(5,180)';
+        o.rmempty = false;
+
+        o = s.taboption("advanced_confs", form.Flag, 'fast_open', _('TCP Fast Open'),
+            _('if platform tcp fast open supported'));
+        o.rmempty = false;
+
+        o = s.taboption("advanced_confs", form.Flag, 'mptcp', _('TCP Mptcp'),
+            _('if platform tcp mptcp supported'));
+        o.rmempty = false;
+
+        o = s.taboption("advanced_confs", form.Value, 'nofile', _('Nofile'),
+            _('max allowed sockets limit'));
+        o.datatype = 'range(512,65535)';
+        o.rmempty = false;
 
         return m.render();
     }
