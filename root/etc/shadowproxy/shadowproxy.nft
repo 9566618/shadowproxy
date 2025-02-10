@@ -73,11 +73,9 @@ table inet shadowproxy-mangle {
         elements = { 2001:4860:4860::8888, 2001:4860:4860::8844 }
     }
 
-    set ignored_udp_ports {
+    set udp_ports_set {
         type inet_service
-        elements = {
-            53,
-        }
+        elements = {80, 443}
     }
 
     chain shadowproxy_input {
@@ -89,7 +87,7 @@ table inet shadowproxy-mangle {
         meta l4proto tcp meta mark set 1 tproxy to :$tproxy_port accept comment "proxy tcp"
         ip daddr @dns_v4 udp dport 53 meta mark set 1 tproxy ip to :$tproxy_port accept comment "support ipv4 dns"
         ip6 daddr @dns_v6 udp dport 53 meta mark set 1 tproxy ip6 to :$tproxy_port accept comment "support ipv6 dns"
-        meta l4proto udp th dport != @ignored_udp_ports meta mark set 1 tproxy to :$tproxy_port accept comment "proxy udp"
+        meta l4proto udp th dport @udp_ports_set meta mark set 1 tproxy to :$tproxy_port accept comment "proxy udp"
     }
 
     chain shadowproxy_output {
@@ -103,7 +101,7 @@ table inet shadowproxy-mangle {
         meta l4proto tcp meta mark set 0x00000001 accept comment "reroute tcp to proxy"
         ip daddr @dns_v4 udp dport 53 meta mark set 1 accept comment "support ipv4 dns"
         ip6 daddr @dns_v6 udp dport 53 meta mark set 1 accept comment "support ipv6 dns"
-        meta l4proto udp th dport != @ignored_udp_ports meta mark set 0x00000001 accept comment "reroute udp to proxy"
+        meta l4proto udp th dport @udp_ports_set meta mark set 0x00000001 accept comment "reroute udp to proxy"
     }
 
 }

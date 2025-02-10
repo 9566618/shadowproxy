@@ -143,7 +143,7 @@ var page = view.extend({
         var proxy_domain_file = '/etc/shadowproxy/proxy_domains.acl'
         o = s.taboption("domain", form.TextValue, 'proxy_domain_list', "",
             _("proxy the target domains"));
-        o.rows = 24;
+        o.rows = 32;
         o.monospace = true;
         o.cfgvalue = function (section_id) {
             return fs.trimmed(proxy_domain_file);
@@ -167,7 +167,7 @@ var page = view.extend({
         var bypass_ipset_file = '/etc/shadowproxy/bypass_ipset.acl';
         o = s.taboption("bypass_ipset", form.TextValue, 'bypass_ipset_list', "",
             _('bypass the ipv4 and ipv6 address'));
-        o.rows = 24;
+        o.rows = 32;
         o.monospace = true;
         o.cfgvalue = function (section_id) {
             return fs.trimmed(bypass_ipset_file);
@@ -216,8 +216,14 @@ var page = view.extend({
 
         o = s.taboption("advanced_confs", form.Value, 'nofile', _('Nofile'),
             _('max allowed sockets limit'));
-        o.datatype = 'range(512,65535)';
+        o.datatype = 'range(512,20480)';
         o.rmempty = false;
+
+        o = s.taboption("advanced_confs", form.DynamicList, 'allowed_udp_port', _('Allowed UDP Ports'),
+            _('Proxy udp by destination packets port'));
+        o.datatype = 'port';
+        o.rmempty = false;
+        o.optional = true;
 
         return m.render();
     }

@@ -22,10 +22,12 @@ config server
     option method 'rc4-md5'
 
 config conf settings
-    option worker_count 16
-    option client_cache_size 64
+    option worker_count '16'
+    option client_cache_size '64'
     option no_delay '0'
     option keep_alive 15
-    option nofile 10240
+    option nofile '10240'
     option fast_open '0'
     option mptcp '0'
+    list allowed_udp_port '80'
+    list allowed_udp_port '443'

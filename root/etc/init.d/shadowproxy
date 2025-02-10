@@ -204,6 +204,16 @@ update_nftables() {
   if [ -n "${SERVER_LIST_V6}" ]; then
     nft add element inet shadowproxy-mangle whitelist_v6_set \{ "${SERVER_LIST_V6}" \}
   fi
+
+  local allowed_udp_ports
+  config_get allowed_udp_ports "settings" allowed_udp_port
+  ALLOWED_PORTS=""
+  for port in $allowed_udp_ports; do
+    ALLOWED_PORTS="$ALLOWED_PORTS ${port},"
+  done
+  if [ -n "${ALLOWED_PORTS}" ]; then
+    nft add element inet shadowproxy-mangle udp_ports_set \{ "$ALLOWED_PORTS" \}
+  fi
 }
 
 update_proxy_domains() {
