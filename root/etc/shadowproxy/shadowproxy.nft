@@ -80,6 +80,7 @@ table inet shadowproxy-mangle {
 
     chain shadowproxy_input {
         type filter hook prerouting priority mangle; policy accept;
+        meta mark 0x000000ff return comment "bypass sslocal fwmark 255"
         ip daddr @whitelist_v4_set return comment "bypass whitelist_v4"
         ip6 daddr @whitelist_v6_set return comment "bypass whitelist_v6"
         ip daddr @chnip4_set return comment "bypass chnip4"
