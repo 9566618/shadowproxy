@@ -2,17 +2,17 @@
   "servers": [
     {
       "server": "::",
-      "server_port": 8081,
-      "password": "password",
+      "server_port": 8388,
+      "password": "CHANGE_ME",
       "method": "aes-256-gcm",
       "mode": "tcp_and_udp"
     }
   ],
 
-  "nofile": 30240,
+  "nofile": 32768,
   "ipv6_first": false,
   "ipv6_only": false,
-  "outbound_fwmark": 61888,
+  "outbound_fwmark": 255,
   "udp_timeout": 300,
 
   "security": {
@@ -27,6 +27,6 @@
 
   "runtime": {
     "mode": "multi_thread",
-    "worker_count": 256
+    "worker_count": 16
   }
 }

@@ -23,6 +23,11 @@ OpenWrt 透明代理解决方案，基于 shadowsocks-rust，提供 LuCI 图形�
 | mips-musl | MIPS 大端 (部分路由器) |
 | mipsel-musl | MIPS 小端 (部分路由器) |
 
+> ⚠️ **安全说明**：本项目提供的 `sslocal` 二进制文件部分编译包含优化混淆。如有安全顾虑，建议：
+> 1. 使用 [shadowsocks-rust 官方 Release](https://github.com/shadowsocks/shadowsocks-rust/releases) 二进制文件
+> 2. 选择更复杂的加密方式（如 `aes-256-gcm` 或 `chacha20-ietf-poly1305`）
+> 3. 或从源码自行编译：`cargo build --release --features local-dns,local-redir,security-replay-attack-detect`
+
 ## 安装
 
 ### 方式一：IPK 安装包（推荐）
@@ -144,24 +149,80 @@ opkg install nftables kmod-nft-tproxy
 
 ## 搭建 Shadowsocks 服务端
 
-本项目提供了 `ssserver` 可执行文件（x86_64-gnu），可用于搭建服务端：
+本项目提供了一键部署脚本和 `ssserver` 可执行文件（x86_64-gnu），方便快速搭建服务端。
+
+### 一键部署（推荐）
+
+使用 `config/setup-server.sh` 脚本可自动完成安装、配置和优化：
 
 ```bash
-# 创建配置文件 /etc/shadowsocks/config.json
-{
-    "server": "0.0.0.0",
-    "server_port": 8388,
-    "password": "your_password",
-    "method": "aes-256-gcm",
-    "timeout": 300,
-    "fast_open": true
-}
+# 下载脚本到服务器
+scp config/setup-server.sh root@your-server:/root/
 
-# 启动服务
-./ssserver -c /etc/shadowsocks/config.json
+# SSH 登录服务器执行
+ssh root@your-server
+chmod +x setup-server.sh
+
+# 交互式安装
+./setup-server.sh
+
+# 或命令行安装
+./setup-server.sh -p 8388 -k "your_password" -m aes-256-gcm
 ```
 
-推荐使用 systemd 管理服务，参考 `config/shadowsocks.service`。
+脚本功能：
+- ✅ 自动安装 ssserver 到 `/usr/local/bin/`
+- ✅ 生成优化的配置文件
+- ✅ 配置 systemd 服务（支持开机自启、自动重启）
+- ✅ 配置防火墙规则（支持 ufw/firewalld/iptables）
+- ✅ 优化系统参数（TCP BBR、缓冲区等）
+- ✅ 安全加固（systemd 沙箱）
+
+#### 命令行参数
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-p, --port` | 服务端口 | 8388 |
+| `-k, --password` | 连接密码 | (必填) |
+| `-m, --method` | 加密方式 | aes-256-gcm |
+| `-w, --workers` | 工作线程数 | 16 |
+| `-t, --timeout` | UDP 超时(秒) | 300 |
+| `--uninstall` | 卸载服务 | - |
+
+#### 服务管理
+
+```bash
+# 启动/停止/重启
+systemctl start shadowsocks
+systemctl stop shadowsocks
+systemctl restart shadowsocks
+
+# 查看状态和日志
+systemctl status shadowsocks
+journalctl -u shadowsocks -f
+```
+
+### 手动部署
+
+如需手动部署，可参考以下步骤：
+
+```bash
+# 1. 复制可执行文件
+scp bin/x86_64-gnu/ssserver root@server:/usr/local/bin/
+ssh root@server "chmod +x /usr/local/bin/ssserver"
+
+# 2. 创建配置目录和文件
+ssh root@server "mkdir -p /etc/shadowsocks /var/log/shadowsocks"
+scp config/config.json root@server:/etc/shadowsocks/
+scp config/log4rs.yml root@server:/etc/shadowsocks/
+
+# 3. 修改配置（设置密码等）
+ssh root@server "vi /etc/shadowsocks/config.json"
+
+# 4. 配置 systemd 服务
+scp config/shadowsocks.service root@server:/etc/systemd/system/
+ssh root@server "systemctl daemon-reload && systemctl enable --now shadowsocks"
+```
 
 ## WireGuard 隧道配置
 

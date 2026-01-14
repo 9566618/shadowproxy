@@ -6,19 +6,20 @@ appenders:
       pattern: "{d} {h({l}):<5} {m}{n}"
   file:
     kind: rolling_file
-    path: /tmp/shadowsocks.log
+    path: /var/log/shadowsocks/ssserver.log
     encoder:
       kind: pattern
-      pattern: "{d} {h({l}):<5} {m}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} {h({l}):<5} {m}{n}"
     policy:
       trigger:
         kind: size
-        limit: 10 mb
+        limit: 50 mb
       roller:
         kind: fixed_window
-        pattern: shadowsocks.{}.log
+        pattern: /var/log/shadowsocks/ssserver.{}.log
         count: 5
+        base: 1
 root:
-  level: debug
+  level: info
   appenders:
     - file
