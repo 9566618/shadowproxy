@@ -241,51 +241,72 @@ ssh root@server "systemctl daemon-reload && systemctl enable --now shadowsocks"
 
 ### 配置步骤
 
-项目提供了 `config/wireguard-tunnel-setup.sh` 脚本，支持交互式和命令行两种配置方式。
+项目提供了 `config/wireguard-tunnel-setup.sh` 脚本，支持 IPv4/IPv6 双栈配置。
 
 #### 1. 源端服务器配置（转发端）
 
 源端服务器运行代理服务（如 shadowsocks），将标记的流量通过 WireGuard 隧道转发到目标端。
 
 ```bash
-# 交互式配置
-./wireguard-tunnel-setup.sh
-
-# 或命令行配置
+# 仅 IPv4 配置
 ./wireguard-tunnel-setup.sh -r source \
     -l 10.200.200.1/24 \
     -i eth0 \
-    -e <目标端公网IP> \
-    -m 255 \
-    -t 100
+    -e <目标端公网IPv4>
+
+# IPv4 + IPv6 双栈配置
+./wireguard-tunnel-setup.sh -r source \
+    -l 10.200.200.1/24 \
+    -6 fd00:200::1/64 \
+    -i eth0 \
+    -e <目标端公网IPv4> \
+    -E <目标端公网IPv6>
 ```
 
 参数说明：
-- `-r source`：指定为源端角色
-- `-l 10.200.200.1/24`：本机隧道 IP
-- `-i eth0`：物理网卡接口
-- `-e`：目标端服务器公网 IP
-- `-m 255`：fwmark 标记值（与 shadowsocks-rust 的 `outbound_fwmark` 对应）
-- `-t 100`：策略路由表 ID
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-r source` | 指定为源端角色 | - |
+| `-l` | 本机隧道 IPv4 | - |
+| `-6` | 本机隧道 IPv6 (可选) | - |
+| `-i` | 物理网卡接口 | - |
+| `-e` | 目标端公网 IPv4 | - |
+| `-E` | 目标端公网 IPv6 (可选) | - |
+| `-m` | fwmark 标记值 | 255 |
+| `-t` | 策略路由表 ID | 100 |
 
 #### 2. 目标端服务器配置（出口端）
 
 目标端服务器接收隧道流量并进行 NAT 转发到互联网。
 
 ```bash
+# 仅 IPv4 配置
 ./wireguard-tunnel-setup.sh -r target \
     -l 10.200.200.2/24 \
     -i enp1s0 \
-    -e <源端公网IP> \
-    -s 10.200.200.0/24
+    -e <源端公网IPv4>
+
+# IPv4 + IPv6 双栈配置
+./wireguard-tunnel-setup.sh -r target \
+    -l 10.200.200.2/24 \
+    -6 fd00:200::2/64 \
+    -i enp1s0 \
+    -e <源端公网IPv4> \
+    -E <源端公网IPv6> \
+    -S fd00:200::/64
 ```
 
 参数说明：
-- `-r target`：指定为目标端角色
-- `-l 10.200.200.2/24`：本机隧道 IP
-- `-i enp1s0`：物理网卡接口
-- `-e`：源端服务器公网 IP
-- `-s 10.200.200.0/24`：源端隧道网段（用于配置 AllowedIPs）
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-r target` | 指定为目标端角色 | - |
+| `-l` | 本机隧道 IPv4 | - |
+| `-6` | 本机隧道 IPv6 (可选) | - |
+| `-i` | 物理网卡接口 | - |
+| `-e` | 源端公网 IPv4 | - |
+| `-E` | 源端公网 IPv6 (可选) | - |
+| `-s` | 源端隧道 IPv4 网段 | 自动推断 |
+| `-S` | 源端隧道 IPv6 网段 | fd00:200::/64 |
 
 #### 3. 交换公钥
 
@@ -293,24 +314,33 @@ ssh root@server "systemctl daemon-reload && systemctl enable --now shadowsocks"
 
 ```bash
 # 查看本机公钥
-cat /etc/wireguard/publickey
+cat /etc/wireguard/source_public.key   # 源端
+cat /etc/wireguard/target_public.key   # 目标端
 
-# 将公钥填入对端配置的 [Peer] 部分
+# 编辑对端配置，填入公钥
+vim /etc/wireguard/wg0.conf
 ```
 
 #### 4. 启动隧道
 
 ```bash
-# 启动 WireGuard
-wg-quick up wg0
+# 重启 WireGuard
+systemctl restart wg-quick@wg0
 
-# 设置开机自启
-systemctl enable wg-quick@wg0
+# 验证隧道状态
+wg show
+
+# 测试连通性
+ping 10.200.200.2    # 从源端 ping 目标端
+ping6 fd00:200::2    # IPv6 测试
 ```
 
 ### 脚本其他功能
 
 ```bash
+# 交互式配置（推荐新手使用）
+./wireguard-tunnel-setup.sh
+
 # 仅生成密钥对
 ./wireguard-tunnel-setup.sh --gen-key-only
 
@@ -319,7 +349,33 @@ systemctl enable wg-quick@wg0
 
 # 卸载配置
 ./wireguard-tunnel-setup.sh --uninstall
+
+# 跳过确认提示（自动化部署）
+./wireguard-tunnel-setup.sh -r source -l 10.200.200.1/24 -i eth0 -e 1.2.3.4 -y
 ```
+
+### 完整参数列表
+
+```bash
+./wireguard-tunnel-setup.sh -h
+```
+
+| 参数 | 说明 |
+|------|------|
+| `-r, --role` | 角色: source (源端) 或 target (目标端) |
+| `-l, --local-ip` | 本机隧道 IPv4 (如: 10.200.200.1/24) |
+| `-6, --local-ip6` | 本机隧道 IPv6 (如: fd00:200::1/64) |
+| `-i, --interface` | 物理网卡接口名 |
+| `-e, --endpoint` | 对端公网 IPv4 |
+| `-E, --endpoint6` | 对端公网 IPv6 |
+| `-k, --peer-key` | 对端 WireGuard 公钥 |
+| `-p, --port` | WireGuard 端口 (默认: 51820) |
+| `-m, --fwmark` | fwmark 值 (默认: 255) |
+| `-t, --table` | 路由表 ID (默认: 100) |
+| `-s, --source-net` | 源端 IPv4 网段 (仅 target) |
+| `-S, --source-net6` | 源端 IPv6 网段 (仅 target) |
+| `--ipv6` | IPv6 模式: auto/yes/no |
+| `-y, --yes` | 跳过确认提示 |
 
 ### 与 ShadowProxy 配合使用
 
