@@ -324,7 +324,7 @@ build_allowed_ips() {
 
         if [[ "$HAS_IPV6" == "true" ]] && [[ -n "$LOCAL_WG_IP6" ]]; then
             local peer_ip6
-            peer_ip6=$(echo "$LOCAL_WG_IP6" | sed 's/::[0-9a-fA-F]*\//::\//' | sed 's/::\//::\/128/' | sed 's/::\//::2\//')
+            peer_ip6=$(echo "$LOCAL_WG_IP6" | sed 's/::[0-9a-fA-F]*\/[0-9]*/::2\/128/')
             ips="${ips}, ${peer_ip6}"
         fi
     fi
