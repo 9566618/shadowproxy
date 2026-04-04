@@ -316,85 +316,89 @@ tail -f /usr/local/var/log/sslocal/sslocal.log
 
 如需通过 WireGuard 隧道转发代理流量（多跳代理），可使用提供的配置脚本。
 
-### 使用场景
+### 架构说明
+
+采用 **服务端/客户端** 架构，支持多个代理节点共用同一个出口节点：
 
 ```
-[客户端] → [OpenWrt 路由器] → [源端服务器(香港)] → [WireGuard隧道] → [目标服务器(新加坡)] → [互联网]
+[HK-1 客户端] ──┐
+[HK-2 客户端] ──┼── WireGuard ──> [服务端(新加坡)] ──> 互联网
+[HK-3 客户端] ──┘
 ```
 
-这种架构适用于：
-- 需要多跳代理提升隐私性
-- 利用不同地区服务器优化线路
-- 分离代理服务和出口节点
+| 角色 | 说明 |
+|------|------|
+| **server (服务端)** | WireGuard Server，出口节点，隧道 IP `.1`，监听等待客户端连接，NAT 转发到互联网 |
+| **client (客户端)** | WireGuard Client，如香港代理节点，隧道 IP `.2`+，主动连接到服务端 |
+
+这种架构的优势：
+- 多个香港代理节点可共用同一个出口节点
+- 服务端无需知道客户端 IP，客户端主动连接
+- 新增客户端时只需在服务端 `--add-peer`，无需重启
 
 ### 配置步骤
 
 项目提供了 `config/wireguard-tunnel-setup.sh` 脚本，支持 IPv4/IPv6 双栈配置。
 
-#### 1. 源端服务器配置（转发端）
+#### 1. 服务端配置（出口端）
 
-源端服务器运行代理服务（如 shadowsocks），将标记的流量通过 WireGuard 隧道转发到目标端。
+服务端作为 WireGuard Server，监听并接收客户端连接，NAT 转发流量到互联网。无需指定客户端 IP。
 
 ```bash
 # 仅 IPv4 配置
-./wireguard-tunnel-setup.sh -r source \
+./wireguard-tunnel-setup.sh -r server \
     -l 10.200.200.1/24 \
-    -i eth0 \
-    -e <目标端公网IPv4>
+    -i enp1s0
 
 # IPv4 + IPv6 双栈配置
-./wireguard-tunnel-setup.sh -r source \
+./wireguard-tunnel-setup.sh -r server \
     -l 10.200.200.1/24 \
     -6 fd00:200::1/64 \
-    -i eth0 \
-    -e <目标端公网IPv4> \
-    -E <目标端公网IPv6>
+    -i enp1s0 \
+    -N fd00:200::/64
 ```
 
 参数说明：
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `-r source` | 指定为源端角色 | - |
+| `-r server` | 指定为服务端角色 | - |
 | `-l` | 本机隧道 IPv4 | - |
 | `-6` | 本机隧道 IPv6 (可选) | - |
 | `-i` | 物理网卡接口 | - |
-| `-e` | 目标端公网 IPv4 | - |
-| `-E` | 目标端公网 IPv6 (可选) | - |
-| `-m` | fwmark 标记值 | 255 |
-| `-t` | 策略路由表 ID | 100 |
+| `-n` | 客户端隧道 IPv4 网段 | 自动推断 |
+| `-N` | 客户端隧道 IPv6 网段 | fd00:200::/64 |
 
-#### 2. 目标端服务器配置（出口端）
+#### 2. 客户端配置（香港代理节点）
 
-目标端服务器接收隧道流量并进行 NAT 转发到互联网。
+客户端作为 WireGuard Client，主动连接到服务端，将标记的代理流量通过隧道转发。
 
 ```bash
 # 仅 IPv4 配置
-./wireguard-tunnel-setup.sh -r target \
+./wireguard-tunnel-setup.sh -r client \
     -l 10.200.200.2/24 \
-    -i enp1s0 \
-    -e <源端公网IPv4>
+    -i eth0 \
+    -e <服务端公网IPv4>
 
 # IPv4 + IPv6 双栈配置
-./wireguard-tunnel-setup.sh -r target \
+./wireguard-tunnel-setup.sh -r client \
     -l 10.200.200.2/24 \
     -6 fd00:200::2/64 \
-    -i enp1s0 \
-    -e <源端公网IPv4> \
-    -E <源端公网IPv6> \
-    -S fd00:200::/64
+    -i eth0 \
+    -e <服务端公网IPv4> \
+    -E <服务端公网IPv6>
 ```
 
 参数说明：
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `-r target` | 指定为目标端角色 | - |
+| `-r client` | 指定为客户端角色 | - |
 | `-l` | 本机隧道 IPv4 | - |
 | `-6` | 本机隧道 IPv6 (可选) | - |
 | `-i` | 物理网卡接口 | - |
-| `-e` | 源端公网 IPv4 | - |
-| `-E` | 源端公网 IPv6 (可选) | - |
-| `-s` | 源端隧道 IPv4 网段 | 自动推断 |
-| `-S` | 源端隧道 IPv6 网段 | fd00:200::/64 |
+| `-e` | 服务端公网 IPv4 | - |
+| `-E` | 服务端公网 IPv6 (可选) | - |
+| `-m` | fwmark 标记值 | 255 |
+| `-t` | 策略路由表 ID | 100 |
 
 #### 3. 交换公钥
 
@@ -402,14 +406,28 @@ tail -f /usr/local/var/log/sslocal/sslocal.log
 
 ```bash
 # 查看本机公钥
-cat /etc/wireguard/source_public.key   # 源端
-cat /etc/wireguard/target_public.key   # 目标端
+cat /etc/wireguard/client_public.key   # 客户端
+cat /etc/wireguard/server_public.key   # 服务端
 
 # 编辑对端配置，填入公钥
 vim /etc/wireguard/wg0.conf
 ```
 
-#### 4. 启动隧道
+#### 4. 添加更多客户端
+
+在服务端使用 `--add-peer` 添加新的香港代理节点，无需重启 WireGuard：
+
+```bash
+# 在服务端执行，添加新客户端 (热加载)
+./wireguard-tunnel-setup.sh --add-peer -k <客户端公钥> -a 10.200.200.3/32
+
+# 或交互式添加 (会提示输入公钥和 IP)
+./wireguard-tunnel-setup.sh --add-peer
+```
+
+> 💡 服务端使用 `.1`，客户端从 `.2` 开始递增（如 `.2`, `.3`, `.4`）
+
+#### 5. 启动隧道
 
 ```bash
 # 重启 WireGuard
@@ -419,8 +437,8 @@ systemctl restart wg-quick@wg0
 wg show
 
 # 测试连通性
-ping 10.200.200.2    # 从源端 ping 目标端
-ping6 fd00:200::2    # IPv6 测试
+ping 10.200.200.1    # 从客户端 ping 服务端
+ping6 fd00:200::1    # IPv6 测试
 ```
 
 ### 脚本其他功能
@@ -435,11 +453,14 @@ ping6 fd00:200::2    # IPv6 测试
 # 查看当前配置
 ./wireguard-tunnel-setup.sh --show-config
 
+# 向服务端添加新客户端
+./wireguard-tunnel-setup.sh --add-peer -k <公钥> -a 10.200.200.4/32
+
 # 卸载配置
 ./wireguard-tunnel-setup.sh --uninstall
 
 # 跳过确认提示（自动化部署）
-./wireguard-tunnel-setup.sh -r source -l 10.200.200.1/24 -i eth0 -e 1.2.3.4 -y
+./wireguard-tunnel-setup.sh -r client -l 10.200.200.2/24 -i eth0 -e 1.2.3.4 -y
 ```
 
 ### 完整参数列表
@@ -450,24 +471,25 @@ ping6 fd00:200::2    # IPv6 测试
 
 | 参数 | 说明 |
 |------|------|
-| `-r, --role` | 角色: source (源端) 或 target (目标端) |
+| `-r, --role` | 角色: server (服务端) 或 client (客户端) |
 | `-l, --local-ip` | 本机隧道 IPv4 (如: 10.200.200.1/24) |
 | `-6, --local-ip6` | 本机隧道 IPv6 (如: fd00:200::1/64) |
 | `-i, --interface` | 物理网卡接口名 |
-| `-e, --endpoint` | 对端公网 IPv4 |
-| `-E, --endpoint6` | 对端公网 IPv6 |
+| `-e, --endpoint` | 服务端公网 IPv4 (仅 client) |
+| `-E, --endpoint6` | 服务端公网 IPv6 (仅 client) |
 | `-k, --peer-key` | 对端 WireGuard 公钥 |
 | `-p, --port` | WireGuard 端口 (默认: 51820) |
-| `-m, --fwmark` | fwmark 值 (默认: 255) |
-| `-t, --table` | 路由表 ID (默认: 100) |
-| `-s, --source-net` | 源端 IPv4 网段 (仅 target) |
-| `-S, --source-net6` | 源端 IPv6 网段 (仅 target) |
+| `-m, --fwmark` | fwmark 值 (仅 client，默认: 255) |
+| `-t, --table` | 路由表 ID (仅 client，默认: 100) |
+| `-n, --client-net` | 客户端 IPv4 网段 (仅 server) |
+| `-N, --client-net6` | 客户端 IPv6 网段 (仅 server) |
+| `--add-peer` | 添加客户端到服务端 |
 | `--ipv6` | IPv6 模式: auto/yes/no |
-| `-y, --yes` | 跳过确认提示 |
+| `-y, --yes` | 跳过确认提示 | |
 
 ### 与 ShadowProxy 配合使用
 
-在 shadowsocks-rust 配置中，`outbound_fwmark` 设置为 `255`（默认值），所有代理出站流量会被打上 fwmark=255 的标记。源端服务器的策略路由会将这些标记流量导入 WireGuard 隧道。
+在 shadowsocks-rust 配置中，`outbound_fwmark` 设置为 `255`（默认值），所有代理出站流量会被打上 fwmark=255 的标记。客户端的策略路由会将这些标记流量导入 WireGuard 隧道转发到服务端。
 
 ## 常见问题
 

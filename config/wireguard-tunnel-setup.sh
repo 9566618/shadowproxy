@@ -32,41 +32,56 @@ WireGuard 隧道配置工具 (IPv4/IPv6 双栈版)
 用法: ./wireguard-tunnel-setup.sh [选项]
 
 必选参数:
-  -r, --role <source|target>    服务器角色
-                                  source: 源端/转发端 (流量发起方)
-                                  target: 目标端/出口端 (NAT出口方)
+  -r, --role <server|client>    角色
+                                  server: 服务端 (出口端，监听并接收客户端连接，NAT 转发)
+                                  client: 客户端 (如香港代理节点，主动连接到 server)
   -l, --local-ip <IP/MASK>      本机隧道IPv4 (如: 10.200.200.1/24)
   -i, --interface <NAME>        物理网卡接口名 (如: eth0, enp1s0)
-  -e, --endpoint <IP>           对端服务器公网IP (IPv4或IPv6)
+  -e, --endpoint <IP>           服务端公网IP (仅 client，IPv4或IPv6)
 
 IPv6 参数:
   -6, --local-ip6 <IP/MASK>     本机隧道IPv6 (如: fd00:200::1/64)
-  -E, --endpoint6 <IP>          对端服务器公网IPv6
-  -S, --source-net6 <CIDR>      源端隧道IPv6网段 (仅target端)
+  -E, --endpoint6 <IP>          服务端公网IPv6 (仅 client)
+  -N, --client-net6 <CIDR>      客户端隧道IPv6网段 (仅 server)
       --ipv6 <auto|yes|no>      IPv6模式 (默认: auto)
 
 可选参数:
   -k, --peer-key <KEY>          对端WireGuard公钥 (可稍后填写)
   -p, --port <PORT>             WireGuard监听端口 (默认: 51820)
   -w, --wg-interface <NAME>     WireGuard接口名 (默认: wg0)
-  -m, --fwmark <MARK>           策略路由fwmark值 (仅source端, 默认: 255)
-  -t, --table <ID>              策略路由表ID (仅source端, 默认: 100)
-  -s, --source-net <CIDR>       源端隧道IPv4网段 (仅target端)
+  -m, --fwmark <MARK>           策略路由fwmark值 (仅 client, 默认: 255)
+  -t, --table <ID>              策略路由表ID (仅 client, 默认: 100)
+  -n, --client-net <CIDR>       客户端隧道IPv4网段 (仅 server)
   -a, --allowed-ips <CIDR>      对端AllowedIPs (自动生成)
       --keepalive <SEC>         PersistentKeepalive (默认: 25)
       --gen-key-only            仅生成密钥对并退出
       --show-config             显示当前配置并退出
+      --add-peer                向已有服务端添加新客户端 (仅 server)
       --uninstall               卸载WireGuard配置
   -y, --yes                     跳过确认提示
   -h, --help                    显示此帮助信息
 
-示例:
-  # 仅IPv4 - 源端
-  ./wireguard-tunnel-setup.sh -r source -l 10.200.200.1/24 -i eth0 -e 45.77.47.173
+架构说明:
+  server (服务端) 作为 WireGuard Server 监听连接 (隧道 IP: x.x.x.1)，
+  多个 client (客户端) 主动连接到 server。
+  适用于多个香港代理节点共用同一个出口节点的场景:
+    [HK-1 client .2] ──┐
+    [HK-2 client .3] ──┼── WireGuard ──> [server .1 出口] ──> 互联网
+    [HK-3 client .4] ──┘
 
-  # IPv4+IPv6 双栈 - 源端
-  ./wireguard-tunnel-setup.sh -r source -l 10.200.200.1/24 -6 fd00:200::1/64 \
+示例:
+  # 服务端 (出口端，监听等待客户端连接，隧道 IP 为 .1)
+  ./wireguard-tunnel-setup.sh -r server -l 10.200.200.1/24 -i enp1s0
+
+  # 客户端 (香港代理节点，连接到服务端)
+  ./wireguard-tunnel-setup.sh -r client -l 10.200.200.2/24 -i eth0 -e 45.77.47.173
+
+  # 客户端 IPv4+IPv6 双栈
+  ./wireguard-tunnel-setup.sh -r client -l 10.200.200.2/24 -6 fd00:200::2/64 \
     -i eth0 -e 45.77.47.173 -E 2001:db8::2
+
+  # 向服务端添加新客户端
+  ./wireguard-tunnel-setup.sh --add-peer -k <客户端公钥> -a 10.200.200.3/32
 
 EOF
     exit 0
@@ -87,13 +102,14 @@ parse_args() {
             -w|--wg-interface)   WG_INTERFACE="$2"; shift 2 ;;
             -m|--fwmark)         FWMARK="$2"; shift 2 ;;
             -t|--table)          ROUTE_TABLE="$2"; shift 2 ;;
-            -s|--source-net)     SOURCE_NETWORK="$2"; shift 2 ;;
-            -S|--source-net6)    SOURCE_NETWORK6="$2"; shift 2 ;;
+            -n|--client-net)     CLIENT_NETWORK="$2"; shift 2 ;;
+            -N|--client-net6)    CLIENT_NETWORK6="$2"; shift 2 ;;
             -a|--allowed-ips)    ALLOWED_IPS="$2"; shift 2 ;;
             --ipv6)              ENABLE_IPV6="$2"; shift 2 ;;
             --keepalive)         KEEPALIVE="$2"; shift 2 ;;
             --gen-key-only)      GEN_KEY_ONLY=true; shift ;;
             --show-config)       SHOW_CONFIG=true; shift ;;
+            --add-peer)          ADD_PEER=true; shift ;;
             --uninstall)         UNINSTALL=true; shift ;;
             -y|--yes)            AUTO_CONFIRM=true; shift ;;
             -h|--help)           show_help ;;
@@ -143,18 +159,18 @@ interactive_input() {
 
     if [[ -z "$ROLE" ]]; then
         echo "请选择服务器角色:"
-        echo "  1) source - 源端/转发端 (流量发起方)"
-        echo "  2) target - 目标端/出口端 (NAT出口)"
+        echo "  1) server - 服务端 (出口端，监听并接收客户端连接，NAT 转发)"
+        echo "  2) client - 客户端 (如香港代理节点，连接到服务端)"
         read -p "请输入 [1/2]: " role_choice
         case $role_choice in
-            1|source) ROLE="source" ;;
-            2|target) ROLE="target" ;;
+            1|server) ROLE="server" ;;
+            2|client) ROLE="client" ;;
             *) log_error "无效选择"; exit 1 ;;
         esac
     fi
 
     if [[ -z "$LOCAL_WG_IP" ]]; then
-        if [[ "$ROLE" == "source" ]]; then
+        if [[ "$ROLE" == "server" ]]; then
             default_ip="10.200.200.1/24"
         else
             default_ip="10.200.200.2/24"
@@ -168,7 +184,7 @@ interactive_input() {
     if [[ "$enable_v6" =~ ^[Yy]$ ]]; then
         HAS_IPV6=true
         if [[ -z "$LOCAL_WG_IP6" ]]; then
-            if [[ "$ROLE" == "source" ]]; then
+            if [[ "$ROLE" == "server" ]]; then
                 default_ip6="fd00:200::1/64"
             else
                 default_ip6="fd00:200::2/64"
@@ -187,20 +203,26 @@ interactive_input() {
         read -p "物理网卡接口名:  " PHYSICAL_INTERFACE
     fi
 
-    if [[ -z "$PEER_ENDPOINT" ]]; then
-        read -p "对端服务器公网 IPv4: " PEER_ENDPOINT
-    fi
+    if [[ "$ROLE" == "client" ]]; then
+        if [[ -z "$PEER_ENDPOINT" ]]; then
+            read -p "服务端公网 IPv4: " PEER_ENDPOINT
+        fi
 
-    if [[ "$HAS_IPV6" == "true" ]] && [[ -z "$PEER_ENDPOINT6" ]]; then
-        read -p "对端服务器公网 IPv6 (可选): " PEER_ENDPOINT6
+        if [[ "$HAS_IPV6" == "true" ]] && [[ -z "$PEER_ENDPOINT6" ]]; then
+            read -p "服务端公网 IPv6 (可选): " PEER_ENDPOINT6
+        fi
     fi
 
     if [[ -z "$PEER_PUBLIC_KEY" ]]; then
-        read -p "对端WireGuard公钥 (可留空): " PEER_PUBLIC_KEY
+        if [[ "$ROLE" == "client" ]]; then
+            read -p "服务端WireGuard公钥 (可留空): " PEER_PUBLIC_KEY
+        else
+            read -p "首个客户端WireGuard公钥 (可留空，稍后用 --add-peer 添加): " PEER_PUBLIC_KEY
+        fi
         PEER_PUBLIC_KEY="${PEER_PUBLIC_KEY:-PEER_PUBLIC_KEY_PLACEHOLDER}"
     fi
 
-    if [[ "$ROLE" == "source" ]]; then
+    if [[ "$ROLE" == "client" ]]; then
         if [[ -z "$FWMARK" ]]; then
             read -p "策略路由 fwmark 值 [默认: 255]:  " FWMARK
             FWMARK="${FWMARK:-255}"
@@ -211,15 +233,15 @@ interactive_input() {
         fi
     fi
 
-    if [[ "$ROLE" == "target" ]]; then
-        if [[ -z "$SOURCE_NETWORK" ]]; then
+    if [[ "$ROLE" == "server" ]]; then
+        if [[ -z "$CLIENT_NETWORK" ]]; then
             default_net=$(echo "$LOCAL_WG_IP" | sed 's/\.[0-9]*\//.0\//')
-            read -p "源端隧道 IPv4 网段 [默认: $default_net]: " SOURCE_NETWORK
-            SOURCE_NETWORK="${SOURCE_NETWORK:-$default_net}"
+            read -p "客户端隧道 IPv4 网段 [默认: $default_net]: " CLIENT_NETWORK
+            CLIENT_NETWORK="${CLIENT_NETWORK:-$default_net}"
         fi
-        if [[ "$HAS_IPV6" == "true" ]] && [[ -z "$SOURCE_NETWORK6" ]]; then
-            read -p "源端隧道 IPv6 网段 [默认: fd00:200::/64]: " SOURCE_NETWORK6
-            SOURCE_NETWORK6="${SOURCE_NETWORK6:-fd00:200::/64}"
+        if [[ "$HAS_IPV6" == "true" ]] && [[ -z "$CLIENT_NETWORK6" ]]; then
+            read -p "客户端隧道 IPv6 网段 [默认: fd00:200::/64]: " CLIENT_NETWORK6
+            CLIENT_NETWORK6="${CLIENT_NETWORK6:-fd00:200::/64}"
         fi
     fi
 
@@ -231,8 +253,8 @@ interactive_input() {
 validate_params() {
     local errors=0
 
-    if [[ -z "$ROLE" ]] || [[ !  "$ROLE" =~ ^(source|target)$ ]]; then
-        log_error "必须指定有效的角色:  source 或 target"
+    if [[ -z "$ROLE" ]] || [[ !  "$ROLE" =~ ^(server|client)$ ]]; then
+        log_error "必须指定有效的角色:  server 或 client"
         errors=$((errors + 1))
     fi
 
@@ -258,24 +280,24 @@ validate_params() {
         log_warn "网卡接口 '$PHYSICAL_INTERFACE' 不存在，请确认"
     fi
 
-    if [[ -z "$PEER_ENDPOINT" ]] && [[ -z "$PEER_ENDPOINT6" ]]; then
-        log_error "必须指定对端服务器 IP (-e 或 -E)"
+    if [[ "$ROLE" == "client" ]] && [[ -z "$PEER_ENDPOINT" ]] && [[ -z "$PEER_ENDPOINT6" ]]; then
+        log_error "客户端必须指定服务端 IP (-e 或 -E)"
         errors=$((errors + 1))
     fi
 
-    if [[ "$ROLE" == "source" ]]; then
+    if [[ "$ROLE" == "client" ]]; then
         FWMARK="${FWMARK:-255}"
         ROUTE_TABLE="${ROUTE_TABLE:-100}"
     fi
 
-    if [[ "$ROLE" == "target" ]]; then
-        if [[ -z "$SOURCE_NETWORK" ]]; then
-            SOURCE_NETWORK=$(echo "$LOCAL_WG_IP" | sed 's/\.[0-9]*\//.0\//')
-            log_info "自动推断源端 IPv4 网段:  $SOURCE_NETWORK"
+    if [[ "$ROLE" == "server" ]]; then
+        if [[ -z "$CLIENT_NETWORK" ]]; then
+            CLIENT_NETWORK=$(echo "$LOCAL_WG_IP" | sed 's/\.[0-9]*\//.0\//')
+            log_info "自动推断客户端 IPv4 网段:  $CLIENT_NETWORK"
         fi
-        if [[ "$HAS_IPV6" == "true" ]] && [[ -n "$LOCAL_WG_IP6" ]] && [[ -z "$SOURCE_NETWORK6" ]]; then
-            SOURCE_NETWORK6="fd00:200::/64"
-            log_info "使用默认源端 IPv6 网段:  $SOURCE_NETWORK6"
+        if [[ "$HAS_IPV6" == "true" ]] && [[ -n "$LOCAL_WG_IP6" ]] && [[ -z "$CLIENT_NETWORK6" ]]; then
+            CLIENT_NETWORK6="fd00:200::/64"
+            log_info "使用默认客户端 IPv6 网段:  $CLIENT_NETWORK6"
         fi
     fi
 
@@ -289,20 +311,21 @@ validate_params() {
 build_allowed_ips() {
     local ips=""
 
-    if [[ "$ROLE" == "source" ]]; then
+    if [[ "$ROLE" == "client" ]]; then
         ips="0.0.0.0/0"
         if [[ "$HAS_IPV6" == "true" ]]; then
             ips="${ips}, ::/0"
         fi
     else
+        # server: AllowedIPs 为客户端隧道 IP
         local peer_ip4
-        peer_ip4=$(echo "$LOCAL_WG_IP" | sed 's/\.[0-9]*\//.1\//' | sed 's/\/[0-9]*/\/32/')
+        peer_ip4=$(echo "$LOCAL_WG_IP" | sed 's/\.[0-9]*\//.2\//' | sed 's/\/[0-9]*/\/32/')
         ips="$peer_ip4"
 
         if [[ "$HAS_IPV6" == "true" ]] && [[ -n "$LOCAL_WG_IP6" ]]; then
             local peer_ip6
-            peer_ip6=$(echo "$LOCAL_WG_IP6" | sed 's/::[0-9a-fA-F]*\//::1\//' | sed 's/\/[0-9]*/\/128/')
-            ips="${ips}, $peer_ip6"
+            peer_ip6=$(echo "$LOCAL_WG_IP6" | sed 's/::[0-9a-fA-F]*\//::\//' | sed 's/::\//::\/128/' | sed 's/::\//::2\//')
+            ips="${ips}, ${peer_ip6}"
         fi
     fi
 
@@ -389,9 +412,9 @@ generate_keys() {
     log_info "密钥已生成"
 }
 
-# ==================== 生成源端配置 ====================
-generate_source_config() {
-    log_step "生成源端 (转发端) WireGuard 配置..."
+# ==================== 生成客户端配置 ====================
+generate_client_config() {
+    log_step "生成客户端 WireGuard 配置..."
 
     build_address_list
     build_allowed_ips
@@ -401,9 +424,9 @@ generate_source_config() {
 
     cat > "$config_file" << EOF
 # ============================================================
-# WireGuard 源端配置 (转发端) - IPv4/IPv6 双栈
+# WireGuard 客户端配置 - IPv4/IPv6 双栈
 # 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-# 角色: 将 fwmark=${FWMARK} 的流量通过隧道转发到目标端
+# 角色: 将 fwmark=${FWMARK} 的流量通过隧道转发到服务端
 # ============================================================
 
 [Interface]
@@ -475,21 +498,20 @@ EOF
     log_info "配置文件已生成:  $config_file"
 }
 
-# ==================== 生成目标端配置 ====================
-generate_target_config() {
-    log_step "生成目标端 (出口端) WireGuard 配置..."
+# ==================== 生成服务端配置 ====================
+generate_server_config() {
+    log_step "生成服务端 WireGuard 配置..."
 
     build_address_list
     build_allowed_ips
-    get_endpoint
 
     local config_file="${WG_DIR}/${WG_INTERFACE}.conf"
 
     cat > "$config_file" << EOF
 # ============================================================
-# WireGuard 目标端配置 (出口端) - IPv4/IPv6 双栈
+# WireGuard 服务端配置 - IPv4/IPv6 双栈
 # 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-# 角色: 接收隧道流量并 NAT 转发到互联网
+# 角色: 接收多个客户端隧道流量并 NAT 转发到互联网
 # ============================================================
 
 [Interface]
@@ -498,20 +520,20 @@ ListenPort = ${WG_PORT}
 PrivateKey = ${PRIVATE_KEY}
 
 # === IPv4 NAT 和转发 ===
-PostUp = iptables -t nat -D POSTROUTING -s ${SOURCE_NETWORK} -o ${PHYSICAL_INTERFACE} -j MASQUERADE 2>/dev/null || true
-PostUp = iptables -t nat -A POSTROUTING -s ${SOURCE_NETWORK} -o ${PHYSICAL_INTERFACE} -j MASQUERADE
+PostUp = iptables -t nat -D POSTROUTING -s ${CLIENT_NETWORK} -o ${PHYSICAL_INTERFACE} -j MASQUERADE 2>/dev/null || true
+PostUp = iptables -t nat -A POSTROUTING -s ${CLIENT_NETWORK} -o ${PHYSICAL_INTERFACE} -j MASQUERADE
 PostUp = iptables -D FORWARD -i ${WG_INTERFACE} -o ${PHYSICAL_INTERFACE} -j ACCEPT 2>/dev/null || true
 PostUp = iptables -A FORWARD -i ${WG_INTERFACE} -o ${PHYSICAL_INTERFACE} -j ACCEPT
 PostUp = iptables -D FORWARD -i ${PHYSICAL_INTERFACE} -o ${WG_INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
 PostUp = iptables -A FORWARD -i ${PHYSICAL_INTERFACE} -o ${WG_INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT
 EOF
 
-    if [[ "$HAS_IPV6" == "true" ]] && [[ -n "$SOURCE_NETWORK6" ]]; then
+    if [[ "$HAS_IPV6" == "true" ]] && [[ -n "$CLIENT_NETWORK6" ]]; then
         cat >> "$config_file" << EOF
 
 # === IPv6 NAT 和转发 ===
-PostUp = ip6tables -t nat -D POSTROUTING -s ${SOURCE_NETWORK6} -o ${PHYSICAL_INTERFACE} -j MASQUERADE 2>/dev/null || true
-PostUp = ip6tables -t nat -A POSTROUTING -s ${SOURCE_NETWORK6} -o ${PHYSICAL_INTERFACE} -j MASQUERADE
+PostUp = ip6tables -t nat -D POSTROUTING -s ${CLIENT_NETWORK6} -o ${PHYSICAL_INTERFACE} -j MASQUERADE 2>/dev/null || true
+PostUp = ip6tables -t nat -A POSTROUTING -s ${CLIENT_NETWORK6} -o ${PHYSICAL_INTERFACE} -j MASQUERADE
 PostUp = ip6tables -D FORWARD -i ${WG_INTERFACE} -o ${PHYSICAL_INTERFACE} -j ACCEPT 2>/dev/null || true
 PostUp = ip6tables -A FORWARD -i ${WG_INTERFACE} -o ${PHYSICAL_INTERFACE} -j ACCEPT
 PostUp = ip6tables -D FORWARD -i ${PHYSICAL_INTERFACE} -o ${WG_INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
@@ -522,14 +544,14 @@ EOF
     cat >> "$config_file" << EOF
 
 # === 关闭时清理 ===
-PostDown = iptables -t nat -D POSTROUTING -s ${SOURCE_NETWORK} -o ${PHYSICAL_INTERFACE} -j MASQUERADE 2>/dev/null || true
+PostDown = iptables -t nat -D POSTROUTING -s ${CLIENT_NETWORK} -o ${PHYSICAL_INTERFACE} -j MASQUERADE 2>/dev/null || true
 PostDown = iptables -D FORWARD -i ${WG_INTERFACE} -o ${PHYSICAL_INTERFACE} -j ACCEPT 2>/dev/null || true
 PostDown = iptables -D FORWARD -i ${PHYSICAL_INTERFACE} -o ${WG_INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
 EOF
 
-    if [[ "$HAS_IPV6" == "true" ]] && [[ -n "$SOURCE_NETWORK6" ]]; then
+    if [[ "$HAS_IPV6" == "true" ]] && [[ -n "$CLIENT_NETWORK6" ]]; then
         cat >> "$config_file" << EOF
-PostDown = ip6tables -t nat -D POSTROUTING -s ${SOURCE_NETWORK6} -o ${PHYSICAL_INTERFACE} -j MASQUERADE 2>/dev/null || true
+PostDown = ip6tables -t nat -D POSTROUTING -s ${CLIENT_NETWORK6} -o ${PHYSICAL_INTERFACE} -j MASQUERADE 2>/dev/null || true
 PostDown = ip6tables -D FORWARD -i ${WG_INTERFACE} -o ${PHYSICAL_INTERFACE} -j ACCEPT 2>/dev/null || true
 PostDown = ip6tables -D FORWARD -i ${PHYSICAL_INTERFACE} -o ${WG_INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
 EOF
@@ -538,8 +560,8 @@ EOF
     cat >> "$config_file" << EOF
 
 [Peer]
+# 客户端 (可通过 --add-peer 添加更多客户端)
 PublicKey = ${PEER_PUBLIC_KEY}
-Endpoint = ${EFFECTIVE_ENDPOINT}
 AllowedIPs = ${ALLOWED_IPS}
 PersistentKeepalive = ${KEEPALIVE}
 EOF
@@ -586,7 +608,7 @@ start_wireguard() {
     wg-quick down "${WG_INTERFACE}" 2>/dev/null || true
     
     # 清理可能残留的路由规则
-    if [[ "$ROLE" == "source" ]]; then
+    if [[ "$ROLE" == "client" ]]; then
         ip rule del fwmark "${FWMARK}" table "${ROUTE_TABLE}" 2>/dev/null || true
         ip route del default table "${ROUTE_TABLE}" 2>/dev/null || true
         if [[ "$HAS_IPV6" == "true" ]]; then
@@ -603,20 +625,27 @@ start_wireguard() {
 
 # ==================== 显示摘要 ====================
 show_summary() {
+    local role_desc
+    if [[ "$ROLE" == "client" ]]; then
+        role_desc="客户端 (client)"
+    else
+        role_desc="服务端 (server)"
+    fi
+
     echo ""
     echo "============================================================"
     echo -e "  ${GREEN}配置完成! ${NC}"
     echo "============================================================"
     echo ""
-    echo "  角色:             ${ROLE}"
+    echo "  角色:             ${role_desc}"
     echo "  WireGuard接口:   ${WG_INTERFACE}"
     echo "  隧道 IPv4:       ${LOCAL_WG_IP}"
     [[ "$HAS_IPV6" == "true" ]] && [[ -n "$LOCAL_WG_IP6" ]] && \
     echo "  隧道 IPv6:       ${LOCAL_WG_IP6}"
     echo "  监听端口:        ${WG_PORT}"
     echo "  物理接口:        ${PHYSICAL_INTERFACE}"
-    echo "  对端:             ${EFFECTIVE_ENDPOINT}"
-    [[ "$ROLE" == "source" ]] && \
+    echo "  对端:             ${EFFECTIVE_ENDPOINT:-(监听模式)}"
+    [[ "$ROLE" == "client" ]] && \
     echo "  策略路由:        fwmark=${FWMARK} -> table ${ROUTE_TABLE}"
     echo ""
     echo "------------------------------------------------------------"
@@ -628,6 +657,12 @@ show_summary() {
         echo -e "  ${RED}注意:  对端公钥未配置!${NC}"
         echo "  编辑:  vim ${WG_DIR}/${WG_INTERFACE}.conf"
         echo "  重启:  systemctl restart wg-quick@${WG_INTERFACE}"
+    fi
+
+    if [[ "$ROLE" == "server" ]]; then
+        echo ""
+        echo "  添加更多客户端:"
+        echo "    $0 --add-peer -k <客户端公钥> -a <客户端隧道IP/32>"
     fi
 
     echo ""
@@ -707,6 +742,60 @@ gen_key_only() {
     exit 0
 }
 
+# ==================== 添加客户端到服务端 ====================
+add_peer() {
+    local config_file="${WG_DIR}/${WG_INTERFACE}.conf"
+
+    if [[ ! -f "$config_file" ]]; then
+        log_error "配置文件不存在: $config_file"
+        log_error "请先使用 -r server 初始化服务端"
+        exit 1
+    fi
+
+    local peer_key="${PEER_PUBLIC_KEY:-}"
+    local peer_ips="${ALLOWED_IPS:-}"
+
+    if [[ -z "$peer_key" ]] || [[ "$peer_key" == "PEER_PUBLIC_KEY_PLACEHOLDER" ]]; then
+        read -rp "客户端 WireGuard 公钥: " peer_key
+        if [[ -z "$peer_key" ]]; then
+            log_error "公钥不能为空"
+            exit 1
+        fi
+    fi
+
+    if [[ -z "$peer_ips" ]]; then
+        read -rp "客户端隧道 IP (如 10.200.200.3/32): " peer_ips
+        if [[ -z "$peer_ips" ]]; then
+            log_error "隧道 IP 不能为空"
+            exit 1
+        fi
+    fi
+
+    log_step "添加客户端到 $config_file ..."
+
+    cat >> "$config_file" << EOF
+
+[Peer]
+# 客户端 - 添加于 $(date '+%Y-%m-%d %H:%M:%S')
+PublicKey = ${peer_key}
+AllowedIPs = ${peer_ips}
+PersistentKeepalive = ${KEEPALIVE}
+EOF
+
+    # 热加载配置
+    if wg show "$WG_INTERFACE" &>/dev/null; then
+        wg syncconf "$WG_INTERFACE" <(wg-quick strip "$WG_INTERFACE")
+        log_info "配置已热加载"
+    else
+        log_warn "WireGuard 未运行，配置将在下次启动时生效"
+    fi
+
+    echo ""
+    log_info "客户端已添加"
+    echo "  公钥:       $peer_key"
+    echo "  AllowedIPs: $peer_ips"
+}
+
 # ==================== 主函数 ====================
 main() {
     if [[ $EUID -ne 0 ]]; then
@@ -719,11 +808,18 @@ main() {
     [[ "$GEN_KEY_ONLY" == "true" ]] && gen_key_only
     [[ "$SHOW_CONFIG" == "true" ]] && show_current_config
     [[ "$UNINSTALL" == "true" ]] && uninstall_wireguard
+    [[ "$ADD_PEER" == "true" ]] && { add_peer; exit 0; }
 
     detect_ipv6_support
 
-    if [[ -z "$ROLE" ]] || [[ -z "$LOCAL_WG_IP" ]] || [[ -z "$PHYSICAL_INTERFACE" ]] || \
-       { [[ -z "$PEER_ENDPOINT" ]] && [[ -z "$PEER_ENDPOINT6" ]]; }; then
+    local need_interactive=false
+    if [[ -z "$ROLE" ]] || [[ -z "$LOCAL_WG_IP" ]] || [[ -z "$PHYSICAL_INTERFACE" ]]; then
+        need_interactive=true
+    fi
+    if [[ "$ROLE" == "client" ]] && [[ -z "$PEER_ENDPOINT" ]] && [[ -z "$PEER_ENDPOINT6" ]]; then
+        need_interactive=true
+    fi
+    if [[ "$need_interactive" == "true" ]]; then
         interactive_input
     fi
 
@@ -739,10 +835,10 @@ main() {
     install_wireguard
     generate_keys
 
-    if [[ "$ROLE" == "source" ]]; then
-        generate_source_config
+    if [[ "$ROLE" == "client" ]]; then
+        generate_client_config
     else
-        generate_target_config
+        generate_server_config
     fi
 
     configure_system
