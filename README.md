@@ -224,6 +224,94 @@ scp config/shadowsocks.service root@server:/etc/systemd/system/
 ssh root@server "systemctl daemon-reload && systemctl enable --now shadowsocks"
 ```
 
+## 本地代理快速启动
+
+本项目提供了 `config/start-local.sh` 脚本，快速启动本地 SOCKS5 / HTTP 代理。脚本自动检测平台和 CPU 架构，选择对应的 `sslocal` 二进制文件：
+
+| 平台 | 架构 | 使用的二进制 |
+|------|------|-------------|
+| Linux | x86_64 | `bin/x86_64-gnu/sslocal` |
+| macOS | Intel (x86_64) | `bin/x86_64-gnu/sslocal` |
+| macOS | Apple Silicon (arm64) | `bin/aarch64-musl/sslocal` |
+
+### 快速启动（后台进程）
+
+```bash
+# Linux: 复制脚本到目标机器
+scp config/start-local.sh user@host:~/gits/shadowproxy/config/
+
+# 命令行启动（macOS / Linux 通用，自动选择二进制）
+./config/start-local.sh -s <服务器地址> -p 8388 -k "your_password"
+
+# 交互式启动（会提示输入服务器和密码）
+./config/start-local.sh
+
+# 停止代理
+./config/start-local.sh --stop
+```
+
+启动后可直接使用：
+
+```bash
+# 设置全局代理
+export ALL_PROXY=socks5h://127.0.0.1:1080
+
+# 或指定代理访问
+curl --proxy socks5h://127.0.0.1:1080 https://www.google.com
+curl --proxy http://127.0.0.1:1081 https://www.google.com
+```
+
+### 安装为系统服务
+
+脚本自动检测平台，Linux 使用 systemd，macOS 使用 launchctl：
+
+#### Linux (systemd)
+
+```bash
+sudo ./config/start-local.sh -s <服务器地址> -p 8388 -k "your_password" --install
+
+# 管理服务
+systemctl status sslocal
+systemctl restart sslocal
+journalctl -u sslocal -f
+
+# 卸载
+sudo ./config/start-local.sh --uninstall
+```
+
+#### macOS (launchctl)
+
+```bash
+# 安装（sslocal 和配置安装到 /usr/local/，plist 安装到 ~/Library/LaunchAgents/）
+./config/start-local.sh -s <服务器地址> -p 8388 -k "your_password" --install
+
+# 管理服务
+launchctl list | grep com.shadowsocks.sslocal
+launchctl unload ~/Library/LaunchAgents/com.shadowsocks.sslocal.plist   # 停止
+launchctl load ~/Library/LaunchAgents/com.shadowsocks.sslocal.plist     # 启动
+tail -f /usr/local/var/log/sslocal/sslocal.log
+
+# 卸载
+./config/start-local.sh --uninstall
+```
+
+> 💡 macOS 用户可在「系统设置 → 网络 → 代理」中配置系统级 SOCKS5/HTTP 代理，指向 `127.0.0.1:1080` / `127.0.0.1:1081`
+
+### 命令行参数
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-s, --server` | 远程服务器地址 | (必填) |
+| `-p, --port` | 远程服务器端口 | 8388 |
+| `-k, --password` | 连接密码 | (必填) |
+| `-m, --method` | 加密方式 | aes-256-gcm |
+| `--socks-port` | 本地 SOCKS5 端口 | 1080 |
+| `--http-port` | 本地 HTTP 代理端口 | 1081 |
+| `-l, --log-level` | 日志级别 | info |
+| `--stop` | 停止后台 sslocal | - |
+| `--install` | 安装为 systemd 服务 | - |
+| `--uninstall` | 卸载 systemd 服务 | - |
+
 ## WireGuard 隧道配置
 
 如需通过 WireGuard 隧道转发代理流量（多跳代理），可使用提供的配置脚本。
