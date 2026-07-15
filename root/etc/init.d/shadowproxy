@@ -182,6 +182,30 @@ config_route() {
   ip -6 route add local ::/0 dev lo table 803
 }
 
+# Ensure the firewall's WAN masquerade covers the current WAN L3 device.
+# On boot fw4 can be loaded before pppoe-wan is dialed up, so the wan zone
+# srcnat/masquerade ends up bound only to the ethernet device (e.g. eth0).
+# The bypass (direct) path then egresses un-NAT'd and domestic traffic from
+# LAN/WireGuard clients gets dropped, while proxied traffic still works.
+# This service already restarts on the pppoe-wan interface trigger, so verify
+# here and reload the firewall only when the real WAN device is missing.
+check_wan_nat() {
+  local wan_dev jumpline
+  . /lib/functions/network.sh
+  network_flush_cache
+  network_get_device wan_dev wan
+
+  [ -n "$wan_dev" ] || return 0
+
+  jumpline="$(nft list chain inet fw4 srcnat 2>/dev/null | grep 'jump srcnat_wan')"
+  # No wan masquerade at all, or the device is already covered: nothing to do.
+  [ -n "$jumpline" ] || return 0
+  echo "$jumpline" | grep -q "\"$wan_dev\"" && return 0
+
+  _info "wan device $wan_dev missing from firewall srcnat, reloading firewall"
+  fw4 reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1
+}
+
 update_nftables() {
   if [ -n "$(nft list tables | grep shadowproxy-mangle)" ]; then
     nft delete table inet shadowproxy-mangle
@@ -295,6 +319,7 @@ start_service() {
 
   config_sysctl
   config_route
+  check_wan_nat
   update_nftables
   update_proxy_domains
   start_shadowproxy
