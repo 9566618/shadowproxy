@@ -588,6 +588,18 @@ configure_system() {
         log_info "IPv6 转发已启用"
     fi
 
+    # ufw 环境必须用 ufw 添加规则: 裸 iptables 规则在 ufw reload/重启后会被清空，
+    # 导致 WireGuard 握手包被默认 DROP 策略丢弃、隧道静默中断
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow "${WG_PORT}/udp" >/dev/null
+        log_info "ufw 已放行 UDP 端口 ${WG_PORT}"
+        if [[ "$ROLE" == "server" ]]; then
+            ufw route allow in on "${WG_INTERFACE}" out on "${PHYSICAL_INTERFACE}" >/dev/null
+            log_info "ufw 已放行 ${WG_INTERFACE} -> ${PHYSICAL_INTERFACE} 转发"
+        fi
+        return 0
+    fi
+
     if command -v iptables &>/dev/null; then
         iptables -C INPUT -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null || \
         iptables -A INPUT -p udp --dport "${WG_PORT}" -j ACCEPT
