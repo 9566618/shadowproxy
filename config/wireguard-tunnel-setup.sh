@@ -613,6 +613,33 @@ configure_system() {
     fi
 }
 
+# ==================== 保护策略路由不被 networkd 清除 ====================
+# client 依赖 wg-quick PostUp 手工加的策略规则/路由 (fwmark -> table，endpoint 旁路，
+# table 默认经 wg0)。systemd-networkd 默认 ManageForeign*=yes，会在每次 DHCP 续租/
+# 重配网卡时把这些"外来"规则/路由删掉，导致隧道在但不转发，必须重启 wg-quick 才恢复。
+# 关掉 networkd 对外来规则/路由的管理即可根治。
+configure_networkd_persistence() {
+    [[ "$ROLE" != "client" ]] && return 0
+    command -v systemctl &>/dev/null || return 0
+    systemctl is-active --quiet systemd-networkd 2>/dev/null || return 0
+
+    log_step "保护策略路由不被 systemd-networkd 清除..."
+
+    local dropin_dir="/etc/systemd/networkd.conf.d"
+    local dropin="${dropin_dir}/10-keep-wg-routes.conf"
+    mkdir -p "$dropin_dir"
+    cat > "$dropin" << 'EOF'
+# 阻止 systemd-networkd 删除 wg-quick 通过 PostUp 添加的策略路由规则/路由。
+# 默认 ManageForeign*=yes 会在 DHCP 续租/重配网卡时清掉它们，使客户端隧道在但不转发。
+[Network]
+ManageForeignRoutes=no
+ManageForeignRoutingPolicyRules=no
+EOF
+
+    systemctl restart systemd-networkd 2>/dev/null || true
+    log_info "已写入 ${dropin} 并重启 networkd"
+}
+
 # ==================== 启动服务 ====================
 start_wireguard() {
     log_step "启动 WireGuard 服务..."
@@ -854,6 +881,7 @@ main() {
     fi
 
     configure_system
+    configure_networkd_persistence
     start_wireguard
     show_summary
 }
