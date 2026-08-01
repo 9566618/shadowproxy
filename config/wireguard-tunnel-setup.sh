@@ -47,19 +47,30 @@ IPv6 参数:
 
 可选参数:
   -k, --peer-key <KEY>          对端WireGuard公钥 (可稍后填写)
-  -p, --port <PORT>             WireGuard监听端口 (默认: 51820)
+  -p, --port <PORT>             本机监听端口 (server 默认: 51820)
+                                  client 不指定时不写 ListenPort，由内核分配随机
+                                  端口，同一台机器上多个 client 接口不会撞端口
+  -P, --peer-port <PORT>        对端端口 (仅 client, 默认: 同 --port 或 51820)
   -w, --wg-interface <NAME>     WireGuard接口名 (默认: wg0)
   -m, --fwmark <MARK>           策略路由fwmark值 (仅 client, 默认: 255)
   -t, --table <ID>              策略路由表ID (仅 client, 默认: 100)
   -n, --client-net <CIDR>       客户端隧道IPv4网段 (仅 server)
   -a, --allowed-ips <CIDR>      对端AllowedIPs (自动生成)
       --keepalive <SEC>         PersistentKeepalive (默认: 25)
-      --gen-key-only            仅生成密钥对并退出
       --show-config             显示当前配置并退出
       --add-peer                向已有服务端添加新客户端 (仅 server)
-      --uninstall               卸载WireGuard配置
+      --uninstall               卸载WireGuard配置 (只影响 -w 指定的接口)
   -y, --yes                     跳过确认提示
   -h, --help                    显示此帮助信息
+
+独立命令 (先换密钥，再互填公钥，避免"先有鸡还是先有蛋"):
+      --gen-key                 生成该接口的密钥对并打印公钥；已存在则直接复用
+                                  (幂等；要轮换密钥请先删除密钥文件)
+      --show-pubkey             只打印该接口的公钥到 stdout，供脚本取值
+      --gen-key-only            --gen-key 的旧名，保留兼容
+
+  密钥文件按接口名存放: /etc/wireguard/<接口名>_private.key / _public.key
+  (wg0 若已存在旧版按角色命名的 client_*.key / server_*.key 则继续沿用)
 
 架构说明:
   server (服务端) 作为 WireGuard Server 监听连接 (隧道 IP: x.x.x.1)，
@@ -68,6 +79,11 @@ IPv6 参数:
     [HK-1 client .2] ──┐
     [HK-2 client .3] ──┼── WireGuard ──> [server .1 出口] ──> 互联网
     [HK-3 client .4] ──┘
+
+  反过来，同一台机器也可以起多个 client 接口，按 fwmark 分流到不同出口:
+    ss :8081 → fwmark 255 → table 100 → wg0 → [出口 A]
+    ss :8082 → fwmark 254 → table 101 → wg1 → [出口 B]
+  每个接口用独立的 -w / -m / -t，密钥按接口名自动隔离。
 
 示例:
   # 服务端 (出口端，监听等待客户端连接，隧道 IP 为 .1)
@@ -80,8 +96,18 @@ IPv6 参数:
   ./wireguard-tunnel-setup.sh -r client -l 10.200.200.2/24 -6 fd00:200::2/64 \
     -i eth0 -e 45.77.47.173 -E 2001:db8::2
 
+  # 同机第二个客户端 (独立接口/fwmark/路由表，连到另一个出口)
+  ./wireguard-tunnel-setup.sh -r client -w wg1 -l 10.200.201.2/24 \
+    -i eth0 -e 45.76.176.94 -m 254 -t 101
+
   # 向服务端添加新客户端
   ./wireguard-tunnel-setup.sh --add-peer -k <客户端公钥> -a 10.200.200.3/32
+
+  # 先换公钥再部署 (两端都不需要事先知道对方)
+  A: ./wireguard-tunnel-setup.sh --gen-key -w wg1        # 打印 A 的公钥
+  B: ./wireguard-tunnel-setup.sh -r server ... -k <A的公钥>
+  B: ./wireguard-tunnel-setup.sh --show-pubkey           # 取 B 的公钥
+  A: ./wireguard-tunnel-setup.sh -r client -w wg1 ... -k <B的公钥>
 
 EOF
     exit 0
@@ -98,7 +124,8 @@ parse_args() {
             -e|--endpoint)       PEER_ENDPOINT="$2"; shift 2 ;;
             -E|--endpoint6)      PEER_ENDPOINT6="$2"; shift 2 ;;
             -k|--peer-key)       PEER_PUBLIC_KEY="$2"; shift 2 ;;
-            -p|--port)           WG_PORT="$2"; shift 2 ;;
+            -p|--port)           WG_PORT="$2"; WG_PORT_SET=true; shift 2 ;;
+            -P|--peer-port)      PEER_PORT="$2"; shift 2 ;;
             -w|--wg-interface)   WG_INTERFACE="$2"; shift 2 ;;
             -m|--fwmark)         FWMARK="$2"; shift 2 ;;
             -t|--table)          ROUTE_TABLE="$2"; shift 2 ;;
@@ -107,7 +134,8 @@ parse_args() {
             -a|--allowed-ips)    ALLOWED_IPS="$2"; shift 2 ;;
             --ipv6)              ENABLE_IPV6="$2"; shift 2 ;;
             --keepalive)         KEEPALIVE="$2"; shift 2 ;;
-            --gen-key-only)      GEN_KEY_ONLY=true; shift ;;
+            --gen-key|--gen-key-only) GEN_KEY=true; shift ;;
+            --show-pubkey)       SHOW_PUBKEY=true; shift ;;
             --show-config)       SHOW_CONFIG=true; shift ;;
             --add-peer)          ADD_PEER=true; shift ;;
             --uninstall)         UNINSTALL=true; shift ;;
@@ -245,8 +273,19 @@ interactive_input() {
         fi
     fi
 
-    read -p "WireGuard 端口 [默认: $WG_PORT]:  " input_port
-    WG_PORT="${input_port:-$WG_PORT}"
+    if [[ "$ROLE" == "client" ]]; then
+        # client 默认不监听固定端口，避免同机多个接口抢同一个 UDP 端口
+        if [[ -z "$PEER_PORT" ]]; then
+            read -p "对端 WireGuard 端口 [默认: $WG_PORT]: " input_port
+            PEER_PORT="${input_port:-$WG_PORT}"
+        fi
+    else
+        read -p "WireGuard 监听端口 [默认: $WG_PORT]: " input_port
+        if [[ -n "$input_port" ]]; then
+            WG_PORT="$input_port"
+            WG_PORT_SET=true
+        fi
+    fi
 }
 
 # ==================== 验证参数 ====================
@@ -288,6 +327,15 @@ validate_params() {
     if [[ "$ROLE" == "client" ]]; then
         FWMARK="${FWMARK:-255}"
         ROUTE_TABLE="${ROUTE_TABLE:-100}"
+    fi
+
+    # 对端端口独立于本机监听端口: 同机多个 client 接口各自随机监听，
+    # 但仍要连到对端真实的 ListenPort。未指定时沿用 --port 保持旧行为。
+    PEER_PORT="${PEER_PORT:-$WG_PORT}"
+
+    # 对端公钥缺失时不写 [Peer]，让接口能先起来，补齐公钥后重跑即可
+    if [[ -z "$PEER_PUBLIC_KEY" ]] || [[ "$PEER_PUBLIC_KEY" == "PEER_PUBLIC_KEY_PLACEHOLDER" ]]; then
+        PEER_KEY_MISSING=true
     fi
 
     if [[ "$ROLE" == "server" ]]; then
@@ -334,10 +382,11 @@ build_allowed_ips() {
 
 # ==================== 确定 Endpoint ====================
 get_endpoint() {
+    local port="${PEER_PORT:-$WG_PORT}"
     if [[ -n "$PEER_ENDPOINT" ]]; then
-        EFFECTIVE_ENDPOINT="${PEER_ENDPOINT}:${WG_PORT}"
+        EFFECTIVE_ENDPOINT="${PEER_ENDPOINT}:${port}"
     elif [[ -n "$PEER_ENDPOINT6" ]]; then
-        EFFECTIVE_ENDPOINT="[${PEER_ENDPOINT6}]:${WG_PORT}"
+        EFFECTIVE_ENDPOINT="[${PEER_ENDPOINT6}]:${port}"
     fi
 }
 
@@ -375,27 +424,49 @@ install_wireguard() {
     log_info "WireGuard 安装完成"
 }
 
+# ==================== 解析密钥文件路径 ====================
+# 密钥按接口名存放 (wg1_private.key)，这样同一台机器上多个 client 接口
+# 各自持有独立身份。旧版本按角色命名 (client_*.key / server_*.key)，会让
+# 第二个 client 静默复用第一个的密钥对，因此新接口一律用接口名。
+# wg0 若只有旧的角色命名密钥则继续沿用，避免升级脚本后现有隧道换密钥断连。
+resolve_key_files() {
+    PRIVATE_KEY_FILE="${WG_DIR}/${WG_INTERFACE}_private.key"
+    PUBLIC_KEY_FILE="${WG_DIR}/${WG_INTERFACE}_public.key"
+
+    [[ -f "$PRIVATE_KEY_FILE" ]] && return 0
+    [[ "$WG_INTERFACE" != "wg0" ]] && return 0
+
+    local legacy
+    for legacy in $ROLE client server; do
+        if [[ -f "${WG_DIR}/${legacy}_private.key" ]] && [[ -f "${WG_DIR}/${legacy}_public.key" ]]; then
+            PRIVATE_KEY_FILE="${WG_DIR}/${legacy}_private.key"
+            PUBLIC_KEY_FILE="${WG_DIR}/${legacy}_public.key"
+            return 0
+        fi
+    done
+}
+
 # ==================== 生成密钥 ====================
 generate_keys() {
-    log_step "生成 WireGuard 密钥对..."
+    log_step "准备 WireGuard 密钥对..."
 
     mkdir -p "$WG_DIR"
-
-    local key_prefix="${ROLE:-wg}"
-    PRIVATE_KEY_FILE="${WG_DIR}/${key_prefix}_private.key"
-    PUBLIC_KEY_FILE="${WG_DIR}/${key_prefix}_public.key"
+    resolve_key_files
 
     if [[ -f "$PRIVATE_KEY_FILE" ]] && [[ -f "$PUBLIC_KEY_FILE" ]]; then
         if [[ "$AUTO_CONFIRM" != "true" ]]; then
-            read -p "密钥已存在，是否重新生成?  [y/N]:  " regen
-            if [[ !  "$regen" =~ ^[Yy]$ ]]; then
-                log_info "使用现有密钥"
+            read -p "密钥已存在 (${PRIVATE_KEY_FILE})，是否重新生成? [y/N]: " regen
+            if [[ ! "$regen" =~ ^[Yy]$ ]]; then
+                log_info "复用现有密钥: $PRIVATE_KEY_FILE"
                 PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
                 PUBLIC_KEY=$(cat "$PUBLIC_KEY_FILE")
                 return 0
             fi
+            # 重新生成时写按接口名命名的新文件，不覆盖旧的角色命名密钥
+            PRIVATE_KEY_FILE="${WG_DIR}/${WG_INTERFACE}_private.key"
+            PUBLIC_KEY_FILE="${WG_DIR}/${WG_INTERFACE}_public.key"
         else
-            log_info "使用现有密钥"
+            log_info "复用现有密钥: $PRIVATE_KEY_FILE"
             PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
             PUBLIC_KEY=$(cat "$PUBLIC_KEY_FILE")
             return 0
@@ -405,11 +476,11 @@ generate_keys() {
     PRIVATE_KEY=$(wg genkey)
     PUBLIC_KEY=$(echo "$PRIVATE_KEY" | wg pubkey)
 
-    echo "$PRIVATE_KEY" > "$PRIVATE_KEY_FILE"
+    # umask 见 gen_key(): 避免私钥文件先以 644 落盘再补 chmod
+    ( umask 077; echo "$PRIVATE_KEY" > "$PRIVATE_KEY_FILE" )
     echo "$PUBLIC_KEY" > "$PUBLIC_KEY_FILE"
-    chmod 600 "$PRIVATE_KEY_FILE"
 
-    log_info "密钥已生成"
+    log_info "密钥已生成: $PRIVATE_KEY_FILE"
 }
 
 # ==================== 生成客户端配置 ====================
@@ -431,9 +502,17 @@ generate_client_config() {
 
 [Interface]
 Address = ${ADDRESS_LIST}
-ListenPort = ${WG_PORT}
 PrivateKey = ${PRIVATE_KEY}
 Table = off
+EOF
+
+    # 只在显式指定 -p 时固定监听端口。client 主动发起连接，不需要固定端口，
+    # 而写死同一个端口会让同机第二个接口 wg-quick up 时 EADDRINUSE 失败。
+    if [[ "$WG_PORT_SET" == "true" ]]; then
+        echo "ListenPort = ${WG_PORT}" >> "$config_file"
+    fi
+
+    cat >> "$config_file" << EOF
 
 # === IPv4 策略路由 ===
 PostUp = ip rule del fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null || true
@@ -485,7 +564,20 @@ EOF
         fi
     fi
 
-    cat >> "$config_file" << EOF
+    # 缺对端公钥时把 [Peer] 注释掉: 写空 PublicKey 会让 wg setconf 直接报错，
+    # 整个 wg-quick up 失败。注释掉则接口能起来，补公钥后重跑脚本即可。
+    if [[ "$PEER_KEY_MISSING" == "true" ]]; then
+        cat >> "$config_file" << EOF
+
+# [Peer] 对端公钥未提供 —— 拿到公钥后重跑本脚本并加上 -k <对端公钥>
+#[Peer]
+#PublicKey = <对端公钥>
+#Endpoint = ${EFFECTIVE_ENDPOINT}
+#AllowedIPs = ${ALLOWED_IPS}
+#PersistentKeepalive = ${KEEPALIVE}
+EOF
+    else
+        cat >> "$config_file" << EOF
 
 [Peer]
 PublicKey = ${PEER_PUBLIC_KEY}
@@ -493,6 +585,7 @@ Endpoint = ${EFFECTIVE_ENDPOINT}
 AllowedIPs = ${ALLOWED_IPS}
 PersistentKeepalive = ${KEEPALIVE}
 EOF
+    fi
 
     chmod 600 "$config_file"
     log_info "配置文件已生成:  $config_file"
@@ -557,7 +650,15 @@ PostDown = ip6tables -D FORWARD -i ${PHYSICAL_INTERFACE} -o ${WG_INTERFACE} -m s
 EOF
     fi
 
-    cat >> "$config_file" << EOF
+    # 无客户端公钥时不写 [Peer]，接口照样能起来监听，之后用 --add-peer 补
+    if [[ "$PEER_KEY_MISSING" == "true" ]]; then
+        cat >> "$config_file" << EOF
+
+# 暂无客户端。添加方式:
+#   $0 --add-peer -w ${WG_INTERFACE} -k <客户端公钥> -a ${ALLOWED_IPS}
+EOF
+    else
+        cat >> "$config_file" << EOF
 
 [Peer]
 # 客户端 (可通过 --add-peer 添加更多客户端)
@@ -565,6 +666,7 @@ PublicKey = ${PEER_PUBLIC_KEY}
 AllowedIPs = ${ALLOWED_IPS}
 PersistentKeepalive = ${KEEPALIVE}
 EOF
+    fi
 
     chmod 600 "$config_file"
     log_info "配置文件已生成:  $config_file"
@@ -588,17 +690,28 @@ configure_system() {
         log_info "IPv6 转发已启用"
     fi
 
+    # 只有真正监听固定端口的接口才需要放行入站。client 不指定 -p 时用随机
+    # 端口主动发起连接，开一个固定端口既没用又多暴露一个面。
+    local needs_inbound=false
+    if [[ "$ROLE" == "server" ]] || [[ "$WG_PORT_SET" == "true" ]]; then
+        needs_inbound=true
+    fi
+
     # ufw 环境必须用 ufw 添加规则: 裸 iptables 规则在 ufw reload/重启后会被清空，
     # 导致 WireGuard 握手包被默认 DROP 策略丢弃、隧道静默中断
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw allow "${WG_PORT}/udp" >/dev/null
-        log_info "ufw 已放行 UDP 端口 ${WG_PORT}"
+        if [[ "$needs_inbound" == "true" ]]; then
+            ufw allow "${WG_PORT}/udp" >/dev/null
+            log_info "ufw 已放行 UDP 端口 ${WG_PORT}"
+        fi
         if [[ "$ROLE" == "server" ]]; then
             ufw route allow in on "${WG_INTERFACE}" out on "${PHYSICAL_INTERFACE}" >/dev/null
             log_info "ufw 已放行 ${WG_INTERFACE} -> ${PHYSICAL_INTERFACE} 转发"
         fi
         return 0
     fi
+
+    [[ "$needs_inbound" != "true" ]] && return 0
 
     if command -v iptables &>/dev/null; then
         iptables -C INPUT -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null || \
@@ -628,24 +741,45 @@ configure_networkd_persistence() {
     local dropin_dir="/etc/systemd/networkd.conf.d"
     local dropin="${dropin_dir}/10-keep-wg-routes.conf"
     mkdir -p "$dropin_dir"
-    cat > "$dropin" << 'EOF'
+    local desired
+    desired=$(cat << 'EOF'
 # 阻止 systemd-networkd 删除 wg-quick 通过 PostUp 添加的策略路由规则/路由。
 # 默认 ManageForeign*=yes 会在 DHCP 续租/重配网卡时清掉它们，使客户端隧道在但不转发。
 [Network]
 ManageForeignRoutes=no
 ManageForeignRoutingPolicyRules=no
 EOF
+)
 
+    # 已经配好就别动: 在跑生产流量的节点上追加第二条隧道时，无谓地重启
+    # networkd 会让物理网卡重跑 DHCP，把现有隧道也一起抖一下。
+    # 只比对生效的配置项，注释文案不同不算差异。
+    if [[ -f "$dropin" ]] \
+       && grep -q '^ManageForeignRoutes=no' "$dropin" \
+       && grep -q '^ManageForeignRoutingPolicyRules=no' "$dropin"; then
+        log_info "networkd 保护已就位，跳过重启: ${dropin}"
+        return 0
+    fi
+
+    echo "$desired" > "$dropin"
     systemctl restart systemd-networkd 2>/dev/null || true
     log_info "已写入 ${dropin} 并重启 networkd"
 }
 
 # ==================== 启动服务 ====================
 start_wireguard() {
+    # client 缺对端公钥时不要启动: 策略路由会把 fwmark 流量指向一个没有 peer
+    # 的接口，等于黑洞。不启动则该 fwmark 继续走原来的路径，不影响现网。
+    if [[ "$ROLE" == "client" ]] && [[ "$PEER_KEY_MISSING" == "true" ]]; then
+        log_warn "对端公钥未配置，跳过启动 ${WG_INTERFACE} (避免黑洞 fwmark ${FWMARK} 的流量)"
+        systemctl enable "wg-quick@${WG_INTERFACE}" 2>/dev/null || true
+        return 0
+    fi
+
     log_step "启动 WireGuard 服务..."
 
     wg-quick down "${WG_INTERFACE}" 2>/dev/null || true
-    
+
     # 清理可能残留的路由规则
     if [[ "$ROLE" == "client" ]]; then
         ip rule del fwmark "${FWMARK}" table "${ROUTE_TABLE}" 2>/dev/null || true
@@ -681,21 +815,28 @@ show_summary() {
     echo "  隧道 IPv4:       ${LOCAL_WG_IP}"
     [[ "$HAS_IPV6" == "true" ]] && [[ -n "$LOCAL_WG_IP6" ]] && \
     echo "  隧道 IPv6:       ${LOCAL_WG_IP6}"
-    echo "  监听端口:        ${WG_PORT}"
+    if [[ "$ROLE" == "server" ]] || [[ "$WG_PORT_SET" == "true" ]]; then
+        echo "  监听端口:        ${WG_PORT}"
+    else
+        echo "  监听端口:        (随机，由内核分配)"
+    fi
     echo "  物理接口:        ${PHYSICAL_INTERFACE}"
     echo "  对端:             ${EFFECTIVE_ENDPOINT:-(监听模式)}"
     [[ "$ROLE" == "client" ]] && \
     echo "  策略路由:        fwmark=${FWMARK} -> table ${ROUTE_TABLE}"
+    echo "  密钥文件:        ${PRIVATE_KEY_FILE}"
     echo ""
     echo "------------------------------------------------------------"
     echo -e "  ${YELLOW}本机公钥 (复制给对端):${NC}"
     echo "  ${PUBLIC_KEY}"
     echo "------------------------------------------------------------"
 
-    if [[ "$PEER_PUBLIC_KEY" == "PEER_PUBLIC_KEY_PLACEHOLDER" ]]; then
-        echo -e "  ${RED}注意:  对端公钥未配置!${NC}"
-        echo "  编辑:  vim ${WG_DIR}/${WG_INTERFACE}.conf"
-        echo "  重启:  systemctl restart wg-quick@${WG_INTERFACE}"
+    if [[ "$PEER_KEY_MISSING" == "true" ]]; then
+        echo ""
+        echo -e "  ${RED}注意: 对端公钥未配置，[Peer] 段未写入${NC}"
+        echo "  拿到对端公钥后重跑本脚本，加上 -k <对端公钥> 即可 (密钥会自动复用)"
+        [[ "$ROLE" == "client" ]] && \
+        echo "  接口暂未启动，以免把 fwmark ${FWMARK} 的流量导进黑洞"
     fi
 
     if [[ "$ROLE" == "server" ]]; then
@@ -714,25 +855,54 @@ show_summary() {
 
 # ==================== 卸载 ====================
 uninstall_wireguard() {
-    log_warn "准备卸载 WireGuard 配置..."
+    local config_file="${WG_DIR}/${WG_INTERFACE}.conf"
+
+    log_warn "准备卸载 WireGuard 配置: ${WG_INTERFACE}"
 
     if [[ "$AUTO_CONFIRM" != "true" ]]; then
-        read -p "确定要卸载?  [y/N]:  " confirm
+        read -p "确定要卸载 ${WG_INTERFACE}? [y/N]: " confirm
         [[ ! "$confirm" =~ ^[Yy]$ ]] && exit 0
     fi
 
     wg-quick down "${WG_INTERFACE}" 2>/dev/null || true
     systemctl disable "wg-quick@${WG_INTERFACE}" 2>/dev/null || true
-    
-    # 清理路由规则
-    ip rule del fwmark 255 table 100 2>/dev/null || true
-    ip -6 rule del fwmark 255 table 100 2>/dev/null || true
-    ip route del default table 100 2>/dev/null || true
-    ip -6 route del default table 100 2>/dev/null || true
-    
-    rm -f "${WG_DIR}/${WG_INTERFACE}.conf"
 
-    log_info "卸载完成"
+    # 从该接口自己的配置里解析 fwmark/table。曾经这里硬编码 255/100，卸载
+    # 任意接口都会删掉 wg0 的策略路由，把同机其他隧道一起打断。
+    local mark="$FWMARK" table="$ROUTE_TABLE" parsed
+    if [[ -f "$config_file" ]]; then
+        parsed=$(sed -n 's/^PostUp = ip rule add fwmark \([0-9]*\) table \([0-9]*\).*/\1 \2/p' "$config_file" | head -1)
+        if [[ -n "$parsed" ]]; then
+            mark="${mark:-${parsed% *}}"
+            table="${table:-${parsed#* }}"
+        fi
+    fi
+
+    if [[ -n "$mark" ]] && [[ -n "$table" ]]; then
+        ip rule del fwmark "$mark" table "$table" 2>/dev/null || true
+        ip -6 rule del fwmark "$mark" table "$table" 2>/dev/null || true
+        ip route del default table "$table" 2>/dev/null || true
+        ip -6 route del default table "$table" 2>/dev/null || true
+        log_info "已清理策略路由: fwmark ${mark} -> table ${table}"
+    else
+        log_warn "无法确定 ${WG_INTERFACE} 的 fwmark/table，跳过策略路由清理"
+        log_warn "如有残留请手动指定: $0 --uninstall -w ${WG_INTERFACE} -m <mark> -t <table>"
+    fi
+
+    # 清理 endpoint 旁路规则 (同样只删该配置里记录的那条)
+    if [[ -f "$config_file" ]]; then
+        local ep
+        while read -r ep; do
+            [[ -n "$ep" ]] && ip rule del to "$ep" lookup main 2>/dev/null || true
+        done < <(sed -n 's|^PostUp = ip rule add to \([0-9./]*\) lookup main.*|\1|p' "$config_file")
+        while read -r ep; do
+            [[ -n "$ep" ]] && ip -6 rule del to "$ep" lookup main 2>/dev/null || true
+        done < <(sed -n 's|^PostUp = ip -6 rule add to \([0-9a-fA-F:/]*\) lookup main.*|\1|p' "$config_file")
+    fi
+
+    rm -f "$config_file"
+
+    log_info "卸载完成: ${WG_INTERFACE} (密钥文件保留在 ${WG_DIR})"
     exit 0
 }
 
@@ -758,26 +928,48 @@ show_current_config() {
     exit 0
 }
 
-# ==================== 仅生成密钥 ====================
-gen_key_only() {
+# ==================== 生成密钥 (独立命令) ====================
+# 幂等: 已有密钥就直接打印公钥，不重新生成。这样可以在两端都还不知道
+# 对方公钥时先各自建号，再互填 -k，绕开"先有鸡还是先有蛋"。
+gen_key() {
+    install_wireguard
     mkdir -p "$WG_DIR"
-    PRIVATE_KEY=$(wg genkey)
-    PUBLIC_KEY=$(echo "$PRIVATE_KEY" | wg pubkey)
+    resolve_key_files
 
-    echo ""
-    echo "私钥:  ${PRIVATE_KEY}"
-    echo "公钥: ${PUBLIC_KEY}"
-    echo ""
-
-    read -p "保存到文件? [y/N]: " save
-    if [[ "$save" =~ ^[Yy]$ ]]; then
-        read -p "文件名前缀 [wg]:  " prefix
-        prefix="${prefix:-wg}"
-        echo "$PRIVATE_KEY" > "${WG_DIR}/${prefix}_private.key"
-        echo "$PUBLIC_KEY" > "${WG_DIR}/${prefix}_public.key"
-        chmod 600 "${WG_DIR}/${prefix}_private.key"
-        log_info "已保存到 ${WG_DIR}/${prefix}_private.key 和 ${WG_DIR}/${prefix}_public.key"
+    if [[ -f "$PRIVATE_KEY_FILE" ]] && [[ -f "$PUBLIC_KEY_FILE" ]]; then
+        log_info "密钥已存在，直接复用 (要轮换请先删除该文件)"
+    else
+        # 先收紧 umask 再重定向: 否则文件按默认 umask 建成 644，私钥会有一段
+        # world-readable 的窗口，之后 chmod 才补上
+        ( umask 077; wg genkey > "$PRIVATE_KEY_FILE" )
+        wg pubkey < "$PRIVATE_KEY_FILE" > "$PUBLIC_KEY_FILE"
+        log_info "密钥已生成"
     fi
+
+    echo ""
+    echo "  接口:   ${WG_INTERFACE}"
+    echo "  私钥:   ${PRIVATE_KEY_FILE}"
+    echo "  公钥:   ${PUBLIC_KEY_FILE}"
+    echo ""
+    echo "------------------------------------------------------------"
+    echo -e "  ${YELLOW}公钥 (复制给对端，作为对端的 -k 参数):${NC}"
+    echo "  $(cat "$PUBLIC_KEY_FILE")"
+    echo "------------------------------------------------------------"
+    echo ""
+    exit 0
+}
+
+# ==================== 仅打印公钥 (供脚本取值) ====================
+show_pubkey() {
+    resolve_key_files
+
+    if [[ ! -f "$PUBLIC_KEY_FILE" ]]; then
+        echo "[ERROR] 公钥不存在: ${PUBLIC_KEY_FILE}" >&2
+        echo "        请先运行: $0 --gen-key -w ${WG_INTERFACE}" >&2
+        exit 1
+    fi
+
+    cat "$PUBLIC_KEY_FILE"
     exit 0
 }
 
@@ -844,7 +1036,8 @@ main() {
 
     parse_args "$@"
 
-    [[ "$GEN_KEY_ONLY" == "true" ]] && gen_key_only
+    [[ "$SHOW_PUBKEY" == "true" ]] && show_pubkey
+    [[ "$GEN_KEY" == "true" ]] && gen_key
     [[ "$SHOW_CONFIG" == "true" ]] && show_current_config
     [[ "$UNINSTALL" == "true" ]] && uninstall_wireguard
     [[ "$ADD_PEER" == "true" ]] && { add_peer; exit 0; }
