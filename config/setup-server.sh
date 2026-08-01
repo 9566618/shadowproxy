@@ -18,7 +18,10 @@ SS_PORT="8388"
 SS_PASSWORD=""
 SS_METHOD="aes-256-gcm"
 SS_TIMEOUT="300"
-WORKER_COUNT="16"
+# 留空 = 不写 worker_count，由 tokio 按 CPU 核数自适应
+# (源码 src/config.rs: "Multithread runtime worker count, CPU count if not configured")
+# 写死一个远大于核数的值只会增加线程栈和调度开销，吞吐不会变高
+WORKER_COUNT=""
 NOFILE="32768"
 
 INSTALL_DIR="/usr/local/bin"
@@ -52,7 +55,7 @@ Shadowsocks-rust 服务端部署脚本
   -p, --port <PORT>         服务端口 (默认: 8388)
   -k, --password <PASS>     连接密码 (必填，或交互输入)
   -m, --method <METHOD>     加密方式 (默认: aes-256-gcm)
-  -w, --workers <NUM>       工作线程数 (默认: 16)
+  -w, --workers <NUM>       工作线程数 (默认: 按 CPU 核数自适应)
   -t, --timeout <SEC>       UDP 超时时间 (默认: 300)
       --uninstall           卸载 Shadowsocks 服务
   -y, --yes                 跳过确认提示
@@ -141,8 +144,8 @@ interactive_input() {
     esac
 
     # 工作线程
-    read -p "工作线程数 [默认: 16]: " input_workers
-    WORKER_COUNT="${input_workers:-16}"
+    read -p "工作线程数 [留空 = 按 CPU 核数自适应，推荐]: " input_workers
+    WORKER_COUNT="${input_workers}"
 }
 
 # ==================== 检查环境 ====================
@@ -183,6 +186,13 @@ generate_config() {
 
     mkdir -p "$CONFIG_DIR"
 
+    # worker_count 留空时整个键都不写，交给 tokio 按 CPU 核数自适应
+    local runtime_block='    "mode": "multi_thread"'
+    if [[ -n "$WORKER_COUNT" ]]; then
+        runtime_block="    \"mode\": \"multi_thread\",
+    \"worker_count\": ${WORKER_COUNT}"
+    fi
+
     # 生成 config.json
     cat > "$CONFIG_DIR/config.json" << EOF
 {
@@ -201,6 +211,9 @@ generate_config() {
   "ipv6_only": false,
   "outbound_fwmark": 255,
   "udp_timeout": ${SS_TIMEOUT},
+  "udp_max_associations": 2048,
+  "no_delay": true,
+  "keep_alive": 30,
 
   "security": {
     "replay_attack": {
@@ -213,8 +226,7 @@ generate_config() {
   },
 
   "runtime": {
-    "mode": "multi_thread",
-    "worker_count": ${WORKER_COUNT}
+${runtime_block}
   }
 }
 EOF
@@ -365,6 +377,13 @@ net.ipv4.tcp_congestion_control = bbr
 net.ipv4.udp_rmem_min = 8192
 net.ipv4.udp_wmem_min = 8192
 
+# 视频/突发流量: 空闲后不要把拥塞窗口打回初始值。播放器缓冲满会暂停拉流，
+# 恢复时若窗口已重置就要重新爬坡，表现为码率反复降级。BBR 下无需保留该行为。
+net.ipv4.tcp_slow_start_after_idle = 0
+
+# 配合 BBR 使用 fq，让 BBR 的发包节奏(pacing)真正生效
+net.core.default_qdisc = fq
+
 # 文件描述符
 fs.file-max = 1048576
 
@@ -459,7 +478,7 @@ confirm_install() {
     echo "即将安装 Shadowsocks 服务端:"
     echo "  端口:       ${SS_PORT}"
     echo "  加密方式:   ${SS_METHOD}"
-    echo "  工作线程:   ${WORKER_COUNT}"
+    echo "  工作线程:   ${WORKER_COUNT:-按 CPU 核数自适应}"
     echo ""
     read -p "确认安装? [Y/n]: " confirm
     case $confirm in

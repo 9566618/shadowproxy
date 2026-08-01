@@ -14,6 +14,9 @@
   "ipv6_only": false,
   "outbound_fwmark": 255,
   "udp_timeout": 300,
+  "udp_max_associations": 2048,
+  "no_delay": true,
+  "keep_alive": 30,
 
   "security": {
     "replay_attack": {
@@ -26,7 +29,6 @@
   },
 
   "runtime": {
-    "mode": "multi_thread",
-    "worker_count": 16
+    "mode": "multi_thread"
   }
 }

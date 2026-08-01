@@ -98,13 +98,15 @@ opkg install nftables kmod-nft-tproxy
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| worker_count | 工作线程数 | 16 |
+| worker_count | 工作线程数，**应设为 CPU 核数** | 4 |
 | client_cache_size | DNS 缓存大小 | 64 |
-| no_delay | TCP_NODELAY | 禁用 |
+| no_delay | TCP_NODELAY，关掉 Nagle 降延迟 | 启用 |
 | keep_alive | TCP 保活时间(秒) | 15 |
 | nofile | 最大文件描述符 | 10240 |
 | fast_open | TCP Fast Open | 禁用 |
 | mptcp | 多路径 TCP | 禁用 |
+
+> 💡 `worker_count` 设得比 CPU 核数大只会浪费内存和调度开销，不会提升吞吐。调优细节见 [性能调优](#性能调优)
 
 ### 应用配置
 
@@ -311,6 +313,119 @@ tail -f /usr/local/var/log/sslocal/sslocal.log
 | `--stop` | 停止后台 sslocal | - |
 | `--install` | 安装为 systemd 服务 | - |
 | `--uninstall` | 卸载 systemd 服务 | - |
+
+## 性能调优
+
+下面每一条都对着 shadowsocks-rust 源码核对过，标注了字段所在位置，避免调到不存在或不生效的参数。
+
+### 先说三个容易踩空的地方
+
+**1. 收发缓冲区不能写在 config.json 里**
+
+`inbound_send_buffer_size` / `inbound_recv_buffer_size` / `outbound_send_buffer_size` / `outbound_recv_buffer_size` 这四个只存在于内部的 `ConnectOpts`/`AcceptOpts`，**从来不从 `SSConfig` 赋值**——写进 config.json 会被静默忽略。它们只是命令行参数：
+
+```bash
+ssserver -c config.json --outbound-recv-buffer-size 4194304
+```
+
+**但通常不该设。** 显式 `setsockopt(SO_RCVBUF/SO_SNDBUF)` 会**关掉内核的接收缓冲自动调整**（`tcp_moderate_rcvbuf`）。只要 `net.core.rmem_max` / `net.ipv4.tcp_rmem` 上限给够，内核会按实际带宽时延积自动伸缩，比手工拍一个固定值更准。手工设小了反而会成为跨境长肥管道的瓶颈。调大内核上限，别动 socket 选项。
+
+**2. `timeout` 是连接超时，不是空闲超时**
+
+源码 `crates/shadowsocks/src/config.rs` 里注释写的是 `Handshake timeout (connect)`，运行时只包住 `connect_server_with_opts`。所以默认的 `15` 是合适的，**不要往大调**——调成 300 不会让长连接更稳，只会让故障服务器的切换从 15 秒变成 5 分钟。空闲连接的回收由 `keep_alive` 和 `udp_timeout` 负责。
+
+**3. `worker_count` 设得比 CPU 核数大只有坏处**
+
+源码 `src/config.rs` 注释：`Multithread runtime worker count, CPU count if not configured`。**留空即按核数自适应**，这是最优解。设成核数的十几倍不会提升吞吐（单机吞吐上限由核数决定），只会多出线程栈和调度开销：
+
+| 场景 | 改动 | 效果 |
+|------|------|------|
+| 1 核 VPS | `worker_count: 16` → 移除 | 线程 16→1，RSS 约 11MB |
+| 4 核路由器 | `worker_count: 64` → `4` | 线程 ~67→7，虚拟内存 209MB→28MB |
+
+### 服务端 (ssserver) 推荐配置
+
+```json
+{
+  "nofile": 32768,
+  "udp_timeout": 300,
+  "udp_max_associations": 2048,
+  "no_delay": true,
+  "keep_alive": 30,
+  "runtime": { "mode": "multi_thread" }
+}
+```
+
+| 配置项 | 作用 |
+|--------|------|
+| `no_delay: true` | 开 TCP_NODELAY 关掉 Nagle。默认 `false`，小包会被攒够或等 40ms 才发，视频分片请求和交互操作都会平白多一截延迟 |
+| `keep_alive: 30` | 探测死连接，回收对端已消失的会话和 NAT 表项 |
+| `udp_max_associations: 2048` | UDP(QUIC/视频)关联数上限。默认**无上限**，小内存机器需要兜底 |
+| `runtime` 不写 `worker_count` | 按 CPU 核数自适应，见上 |
+
+### 客户端 (sslocal / OpenWrt) 推荐配置
+
+OpenWrt 侧通过 uci 配置，`/etc/init.d/shadowproxy` 会套用到模板：
+
+```bash
+uci set shadowproxy.settings.worker_count=4     # = CPU 核数
+uci set shadowproxy.settings.no_delay=1
+uci commit shadowproxy && /etc/init.d/shadowproxy restart
+```
+
+`fast_open`（TCP Fast Open）默认关闭，建议保持——很多中间设备会丢弃带 TFO 数据的 SYN，导致首包重传，反而更慢。
+
+### 系统参数
+
+代理节点和路由器都建议：
+
+```bash
+# 跨境长肥管道: BBR 比 cubic 更能吃满带宽，且不会把缓冲区灌满
+net.ipv4.tcp_congestion_control = bbr
+net.core.default_qdisc = fq            # 路由器用 fq_codel
+
+# 关键: 空闲后不要把拥塞窗口打回初始值
+net.ipv4.tcp_slow_start_after_idle = 0
+
+# 给足自动调整的上限（不要去设 socket 的 SO_RCVBUF）
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+net.ipv4.tcp_mtu_probing = 1
+```
+
+`tcp_slow_start_after_idle = 0` 对看视频影响最直接：播放器缓冲满了就暂停拉流，几秒后再拉，此时拥塞窗口已被重置回初始值，每次恢复都要重新爬坡——表现就是码率反复降级、来回卡顿。
+
+OpenWrt 上 BBR 模块通常有但没加载：
+
+```bash
+modprobe tcp_bbr
+echo tcp_bbr > /etc/modules.d/99-tcp-bbr      # 开机自动加载
+sysctl -n net.ipv4.tcp_available_congestion_control   # 确认出现 bbr
+```
+
+路由器用 `fq_codel` 而非 `fq`，治的是 bufferbloat：上传占满时交互流量被大流堵在队列里，是视频卡顿和游戏延迟飙升的主因。注意 `default_qdisc` **只对新建的 qdisc 生效**，已有接口要手动换：
+
+```bash
+for dev in pppoe-wan eth0 eth1; do tc qdisc replace dev $dev root fq_codel; done
+tc qdisc show | grep -v noqueue      # 确认不再是 pfifo_fast
+```
+
+> 💡 如果上下行带宽已知，装 `sqm-scripts` 做限速整形（cake）效果比裸 fq_codel 更好，但需要填真实线路速率，填错反而限制带宽。
+
+### 效果验证
+
+```bash
+# 线程数是否降下来
+PID=$(pidof ssserver); ls /proc/$PID/task | wc -l
+
+# 拥塞算法/qdisc 是否生效
+sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc net.ipv4.tcp_slow_start_after_idle
+
+# 实际连接用的拥塞算法
+ss -tin | grep -o "bbr\|cubic" | sort | uniq -c
+```
 
 ## WireGuard 隧道配置
 

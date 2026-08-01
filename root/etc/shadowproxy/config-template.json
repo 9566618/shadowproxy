@@ -47,6 +47,8 @@
   "no_delay": "{no_delay}",
   "fast_open": "{fast_open}",
   "mptcp": "{mptcp}",
+  "udp_timeout": 300,
+  "udp_max_associations": 1024,
 
   "balancer": {
     "max_server_rtt": 15,

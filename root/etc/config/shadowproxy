@@ -22,9 +22,12 @@ config server
     option method 'rc4-md5'
 
 config conf settings
-    option worker_count '16'
+    # 建议设为 CPU 核数。设得远高于核数只会增加线程栈和调度开销:
+    # 64 个 worker 在 4 核路由器上会多占约 500MB 虚拟内存，吞吐并不会变高
+    option worker_count '4'
     option client_cache_size '64'
-    option no_delay '0'
+    # TCP_NODELAY: 关掉 Nagle，小包不再被攒 40ms，改善视频分片请求和交互延迟
+    option no_delay '1'
     option keep_alive 15
     option nofile '10240'
     option fast_open '0'

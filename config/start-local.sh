@@ -258,6 +258,9 @@ YAML
   "timeout": 15,
   "nofile": 32768,
   "ipv6_first": false,
+  "no_delay": true,
+  "keep_alive": 30,
+  "udp_timeout": 300,
   "log": {
     "config_path": "${RUN_DIR}/log4rs.yml"
   },
@@ -332,6 +335,9 @@ SYAML
   "timeout": 15,
   "nofile": 32768,
   "ipv6_first": false,
+  "no_delay": true,
+  "keep_alive": 30,
+  "udp_timeout": 300,
   "log": {
     "config_path": "${conf_dir}/log4rs.yml"
   },
