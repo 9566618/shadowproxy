@@ -233,8 +233,10 @@ ssh root@server "systemctl daemon-reload && systemctl enable --now shadowsocks"
 | 平台 | 架构 | 使用的二进制 |
 |------|------|-------------|
 | Linux | x86_64 | `bin/x86_64-gnu/sslocal` |
-| macOS | Intel (x86_64) | `bin/x86_64-gnu/sslocal` |
-| macOS | Apple Silicon (arm64) | `bin/aarch64-musl/sslocal` |
+| macOS | Intel (x86_64) | `bin/x86_64-apple/sslocal` |
+| macOS | Apple Silicon (arm64) | `bin/aarch64-apple/sslocal` |
+
+> ⚠️ macOS 必须用 `bin/*-apple/` 下的 Mach-O 二进制。`bin/*-musl` 和 `bin/*-gnu` 是 Linux ELF，在 macOS 上执行会直接报 `Exec format error`
 
 ### 快速启动（后台进程）
 

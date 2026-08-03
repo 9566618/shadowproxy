@@ -8,7 +8,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=shadowproxy
-PKG_VERSION:=1.18.2
+PKG_VERSION:=1.25.0
 PKG_RELEASE:=1
 
 PKG_LICENSE:=GPLv3

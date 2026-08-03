@@ -53,11 +53,12 @@ fi
 detect_sslocal() {
     local bin=""
     if [[ "$OS_TYPE" == "Darwin" ]]; then
-        # macOS: 根据 CPU 架构选择对应二进制
+        # macOS 需要 Mach-O 格式，不能用 bin/*-musl 或 bin/*-gnu 下的 Linux ELF
+        # (那些在 macOS 上会直接 "Exec format error")
         if [[ "$ARCH_TYPE" == "arm64" ]]; then
-            bin="$PROJECT_DIR/bin/aarch64-musl/sslocal"
+            bin="$PROJECT_DIR/bin/aarch64-apple/sslocal"
         else
-            bin="$PROJECT_DIR/bin/x86_64-gnu/sslocal"
+            bin="$PROJECT_DIR/bin/x86_64-apple/sslocal"
         fi
     else
         # Linux: 使用项目自带的二进制
