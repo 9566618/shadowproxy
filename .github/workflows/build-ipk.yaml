@@ -19,6 +19,10 @@ jobs:
           - x86_64
           - mips_24kc
           - mipsel_24kc
+          # All ARMv7-A; they share bin/armv7-musl/sslocal. See Makefile.
+          - arm_cortex-a7_neon-vfpv4
+          - arm_cortex-a9_vfpv3-d16
+          - arm_cortex-a15_neon-vfpv4
         branch:
           - openwrt-22.03
 

@@ -17,11 +17,28 @@ PKG_MAINTAINER:=King <9566618@gmail.com>
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 PKG_HASH:=skip
-# it is based on the `sslocal`
-PKGARCH:=all
+
+# The package ships a prebuilt sslocal, so it is not architecture independent.
+# Tagging it with the target's package architecture makes opkg refuse to install
+# a mips build on an arm router, and gives every CI job a distinctly named ipk
+# instead of all of them colliding on shadowproxy_<version>_all.ipk.
+PKGARCH:=$(ARCH_PACKAGES)
 
 PKG_LIBC:=musl
-PKG_TARGET_FILE:=$(ARCH)-$(PKG_LIBC)/sslocal
+
+# $(ARCH) is "arm" for every 32-bit ARM subtarget, from ARMv4 (arm_fa526) up to
+# ARMv7 (arm_cortex-a15_neon-vfpv4), so it cannot select the right binary on its
+# own. $(ARCH_PACKAGES) carries the CPU type. Every OpenWrt arm_cortex-a*
+# subtarget is an ARMv7-A core (or an ARMv8 core running 32-bit code, which is a
+# superset), so they all run the armv7-unknown-linux-musleabihf build. The other
+# arm subtargets -- arm1176jzf-s, mpcore, arm926ej-s, xscale, fa526 -- are ARMv6
+# or older; no binary is bundled for them and Build/Compile fails loudly.
+SS_ARCH:=$(ARCH)
+ifeq ($(ARCH),arm)
+  SS_ARCH:=$(if $(filter arm_cortex-a%,$(ARCH_PACKAGES)),armv7,$(ARCH))
+endif
+
+PKG_TARGET_FILE:=$(SS_ARCH)-$(PKG_LIBC)/sslocal
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -40,8 +57,15 @@ define Package/$(PKG_NAME)/description
 	for controlling all net packets
 endef
 
+# Nothing is compiled here, but fail early and with a readable message when the
+# target has no bundled binary, instead of erroring out inside INSTALL_BIN.
 define Build/Compile
-	echo "$(PKG_NAME) Compile Skiped!"
+	@if [ ! -f "./bin/$(PKG_TARGET_FILE)" ]; then \
+		echo "$(PKG_NAME): no bundled sslocal for ARCH=$(ARCH) ARCH_PACKAGES=$(ARCH_PACKAGES)"; \
+		echo "$(PKG_NAME): expected ./bin/$(PKG_TARGET_FILE)"; \
+		exit 1; \
+	fi
+	echo "$(PKG_NAME): using bundled ./bin/$(PKG_TARGET_FILE)"
 endef
 
 define Package/$(PKG_NAME)/install
