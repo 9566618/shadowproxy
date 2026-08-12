@@ -20,7 +20,7 @@ OpenWrt 透明代理解决方案，基于 shadowsocks-rust，提供 LuCI 图形�
 | 目录 | Rust target | 链接方式 | 说明 |
 |------|-------------|---------|------|
 | `aarch64-musl` | `aarch64-unknown-linux-musl` | 静态 | ARM64 (树莓派 4、R2C/R4S 等) |
-| `armv7-musl` | `armv7-unknown-linux-musleabihf` | 静态 | ARMv7-A **硬浮点**，见下方说明 |
+| `armv7-musl` | `armv7-unknown-linux-musleabihf` | 静态 | ARMv7-A 硬浮点 (Cortex-A5/A7/A8/A9/A15) |
 | `x86_64-musl` | `x86_64-unknown-linux-musl` | 静态 (PIE) | x86_64 musl 编译 |
 | `x86_64-gnu` | `x86_64-unknown-linux-gnu` | 动态 (glibc) | x86_64 glibc 编译 |
 | `mips-musl` | `mips-unknown-linux-musl` | 动态 (musl) | MIPS 大端 (部分路由器) |
@@ -29,19 +29,6 @@ OpenWrt 透明代理解决方案，基于 shadowsocks-rust，提供 LuCI 图形�
 | `aarch64-apple` | `aarch64-apple-darwin` | 动态 | macOS Apple Silicon（仅 `sslocal`） |
 
 > 📌 两个 MIPS 二进制是**动态**链接 musl 的，需要目标系统提供 `/lib/ld-musl-mips[el]-sf.so.1`（OpenWrt 的 musl MIPS 目标自带，`-sf` 即软浮点）。其余 Linux 目标不依赖动态链接器。
-
-### ARMv7 说明（eabihf / eabi）
-
-32 位 ARM 没有"通吃"的 target，两条轴都会导致不兼容：**ISA 基线**（v4T → v5TE → v6 → v7，只能向前兼容，低基线 CPU 跑高基线二进制会 SIGILL）和**浮点 ABI**（`eabi` 软浮点 vs `eabihf` 硬浮点，调用约定不同）。
-
-本项目选用 **`armv7-unknown-linux-musleabihf`**，其 LLVM 特性为 `+v7,+vfp3d16,+thumb2,-neon`：
-
-- `+vfp3d16` 是所有 OpenWrt `arm_cortex-a*` 子目标的公共下界，VFPv4 / NEON 都是它的超集
-- `-neon` 是刻意的：`arm_cortex-a9_vfpv3-d16`、`arm_cortex-a5_vfpv4` 等子目标没有 NEON。且 32 位 ARM 上带 NEON 也没有收益——`chacha20` 的 NEON 后端 gate 在 `target_arch = "aarch64"`，`aes` 的硬件加速同样只有 aarch64 的 ARMv8 crypto 扩展，armv7 一律走纯软件实现。因此不使用 `thumbv7neon-unknown-linux-musleabihf`
-
-**关于 eabi（软浮点）userland**：`eabihf` 与 `eabi` 的差异是跨动态链接边界的调用约定。本二进制是静态链接 musl，内部自洽、syscall 直接进内核，而内核不关心浮点 ABI。因此它在软浮点 userland 的 OpenWrt（如 `arm_cortex-a9`、`arm_cortex-a7`，包名无 `vfp`/`neon` 后缀）上同样可用，唯一要求是 **CPU 与内核带 VFP**。若确实遇到无 FPU 的 ARMv7，需自行用 `armv7-unknown-linux-musleabi`（`+v7,+thumb2,+soft-float`）重新编译。
-
-**覆盖范围**：`arm_cortex-a5` / `a7` / `a8` / `a9` / `a15` / `a17` 全部适用。**不适用**于 ARMv6 及更早的 OpenWrt 子目标——`arm_arm1176jzf-s_vfp`、`arm_mpcore`、`arm_arm926ej-s`、`arm_xscale`、`arm_fa526`；这些需要自行编译 `arm-unknown-linux-musleabi`（ARMv6 基线，`+strict-align,+v6`）或 `armv5te-unknown-linux-musleabi`。Makefile 在这些子目标上会直接报错退出，不会打出装着必然 SIGILL 二进制的 ipk；把自行编译的产物放到 `bin/arm-musl/sslocal` 即可让它们恢复可用。
 
 > ⚠️ **安全说明**：本项目提供的 `sslocal` 二进制文件部分编译包含优化混淆。如有安全顾虑，建议：
 > 1. 使用 [shadowsocks-rust 官方 Release](https://github.com/shadowsocks/shadowsocks-rust/releases) 二进制文件
