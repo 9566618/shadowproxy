@@ -18,11 +18,12 @@ PKG_MAINTAINER:=King <9566618@gmail.com>
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 PKG_HASH:=skip
 
-# The package ships a prebuilt sslocal, so it is not architecture independent.
-# Tagging it with the target's package architecture makes opkg refuse to install
-# a mips build on an arm router, and gives every CI job a distinctly named ipk
-# instead of all of them colliding on shadowproxy_<version>_all.ipk.
-PKGARCH:=$(ARCH_PACKAGES)
+# This used to carry a top-level "PKGARCH:=all", which never took effect: define
+# Package/Default in include/package-defaults.mk assigns PKGARCH:=$(ARCH_PACKAGES),
+# and BuildPackage evaluates it after the top-level assignments, so anything set
+# out here is silently overwritten. PKGARCH only works inside define Package/...
+# We want $(ARCH_PACKAGES) anyway -- the package ships a prebuilt sslocal and is
+# not architecture independent -- so the correct value is simply the default.
 
 PKG_LIBC:=musl
 
